@@ -21,6 +21,19 @@ const canvas = document.getElementById("glcanvas");
 const hint = document.getElementById("hint");
 const fallback = document.getElementById("fallback");
 
+// 雨・結露それぞれの描写をON/OFFできるトグル状態
+const effects = { rain: true, fog: true };
+
+function setupToggleButton(id, key) {
+  const btn = document.getElementById(id);
+  btn.addEventListener("click", () => {
+    effects[key] = !effects[key];
+    btn.setAttribute("aria-pressed", String(effects[key]));
+  });
+}
+setupToggleButton("toggleRain", "rain");
+setupToggleButton("toggleFog", "fog");
+
 const gl = canvas.getContext("webgl2", {
   alpha: false,
   antialias: false,
@@ -266,6 +279,7 @@ const displayShader = `#version 300 es
   uniform float uRefractionStrength;
   uniform float uTime;
   uniform vec2 uResolution;
+  uniform float uFogEnabled;
   out vec4 fragColor;
 
   void main () {
@@ -284,8 +298,10 @@ const displayShader = `#version 300 es
     vec3 sharp = texture(uScene, uv).rgb;
     vec3 blurred = texture(uBlurredScene, uv).rgb;
 
-    // 曇り(拭いたマスク)による、シャープ⇔ブラーのブレンド
-    vec3 composite = mix(blurred, sharp, smoothstep(0.05, 0.85, mask));
+    // 曇り(拭いたマスク)による、シャープ⇔ブラーのブレンド。
+    // uFogEnabled が 0 のときは曇り自体を無効にして常にシャープに見せる。
+    float fogMixAmt = mix(1.0, smoothstep(0.05, 0.85, mask), uFogEnabled);
+    vec3 composite = mix(blurred, sharp, fogMixAmt);
 
     // 個々の水滴は、曇っていても外側のガラスにあるので常に奥がシャープに見える
     // 小さなレンズとして、屈折させたシャープな景色を上から乗せる
@@ -526,6 +542,7 @@ function render(t) {
   gl.uniform1f(u.uRefractionStrength, CONFIG.REFRACTION_STRENGTH);
   gl.uniform1f(u.uTime, t);
   gl.uniform2f(u.uResolution, canvas.width, canvas.height);
+  gl.uniform1f(u.uFogEnabled, effects.fog ? 1.0 : 0.0);
   blit(null);
 }
 
@@ -744,6 +761,8 @@ function renderDrops() {
   for (let i = 0; i < drops.length && n < CONFIG.DROP_MAX_COUNT; i++) {
     const d = drops[i];
     if (d.killed) continue;
+    // 「拭った跡から垂れる水滴」は結露の描写、それ以外(外の雨)は雨の描写のトグルに従う
+    if (d.isDrip ? !effects.fog : !effects.rain) continue;
     dropInstanceData[n * 4 + 0] = d.x;
     dropInstanceData[n * 4 + 1] = d.y;
     dropInstanceData[n * 4 + 2] = d.r / aspect;
