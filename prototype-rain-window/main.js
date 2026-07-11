@@ -809,6 +809,8 @@ let dripWetnessAccumulator = 0;
 let lastWipeX = 0.5;
 let lastWipeY = 0.5;
 
+const EFFECTIVE_DRIP_SPAWN_THRESHOLD = CONFIG.DRIP_SPAWN_THRESHOLD * DENSITY_SCALE;
+
 function spawnDrip(x, y) {
   spawnDrop({
     x: x + (Math.random() - 0.5) * 0.015,
@@ -824,8 +826,8 @@ function userSplat(x, y, radius, amount) {
   lastWipeX = x;
   lastWipeY = y;
   dripWetnessAccumulator += radius * radius;
-  while (dripWetnessAccumulator >= CONFIG.DRIP_SPAWN_THRESHOLD) {
-    dripWetnessAccumulator -= CONFIG.DRIP_SPAWN_THRESHOLD;
+  while (dripWetnessAccumulator >= EFFECTIVE_DRIP_SPAWN_THRESHOLD) {
+    dripWetnessAccumulator -= EFFECTIVE_DRIP_SPAWN_THRESHOLD;
     spawnDrip(lastWipeX, lastWipeY);
   }
 }
