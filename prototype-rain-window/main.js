@@ -60,7 +60,7 @@ const CONFIG = {
   // 半径は実際のUV空間半径(円の境界そのもの)。旧ガウシアン分布と見た目の
   // 太さを揃えた上でさらに半分にしている。
   AUTOPLAY_BRUSH_RADIUS: 0.036,
-  USER_BRUSH_RADIUS: 0.0408, // ドラッグもクリックと同じ値を使う
+  USER_BRUSH_RADIUS: 0.0308, // ドラッグもクリックと同じ値を使う
   BLUR_ITERATIONS: 3,
   BLUR_PIXEL_RADIUS: 1.6, // 少し強めのフロストで、外の世界との距離感を強調
 
@@ -91,10 +91,11 @@ const CONFIG = {
   MERGE_GROWTH_CAP: 0.7, // 合体しても大きくなりすぎない上限(旧1.4)
 
   // 拭った場所に溜まる水滴(指でなぞった跡から垂れ落ちる)
-  DRIP_SPAWN_THRESHOLD: 0.05, // これだけの「拭った面積」が溜まるたびに1滴生まれる
-  DRIP_INITIAL_R: 0.022 / 3,
-  DRIP_INITIAL_MOMENTUM: 0.06, // 涙のように、溜まってからためらいがちに滑り出す
-  DRIP_WIPE_AMOUNT: 1.0,
+  DRIP_SPAWN_THRESHOLD: 0.03, // これだけの「拭った面積」が溜まるたびに1滴生まれる
+  DRIP_INITIAL_R: 0.015,
+  DRIP_INITIAL_MOMENTUM: 0.2, // 初速
+  DRIP_WIPE_AMOUNT: 1.0, // 結露を拭う強度
+  DRIP_WIPE_RADIUS_FACTOR: 1 / 2, // 拭う範囲は見た目のインスタンスサイズのこの倍率まで絞る
 };
 
 // ----------------------------------------------------------------------------
@@ -740,9 +741,11 @@ function updateDrops(dt) {
       d.spreadY = 1.0 +  d.momentum * 6.0;
 
       // 指で拭った場所に溜まった水滴は、垂れ落ちながら結露も拭っていく。
-      // 拭う太さは水滴自体の現在の大きさ(d.r)に合わせる。
+      // 見た目のインスタンスサイズ(d.r)はそのまま大きく保ちつつ、
+      // 拭う範囲だけはそのCONFIG.DRIP_WIPE_RADIUS_FACTOR倍(既定1/3)に絞る。
       if (d.isDrip) {
-        splat(d.x, d.y, d.r, CONFIG.DRIP_WIPE_AMOUNT);
+        const wipeRadius = d.r * CONFIG.DRIP_WIPE_RADIUS_FACTOR;
+        splat(d.x, d.y, wipeRadius, CONFIG.DRIP_WIPE_AMOUNT);
       }
 
       if (d.y < -0.06) {
