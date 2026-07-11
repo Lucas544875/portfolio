@@ -461,6 +461,18 @@ function resizeCanvas() {
 resizeCanvas();
 initFramebuffers();
 
+// 水滴のx,yは画面幅・高さに関わらず単純に0〜1の一様分布だが、半径は画面の
+// 「高さ」基準で決まっている。そのため横長の画面では同じ数の水滴が薄まり、
+// 縦長の画面では同じ数が狭い横幅に押し込まれて密度が上がってしまう。
+// 1画面あたりの水滴の被覆率(面積比)がだいたい一定になるよう、実際に
+// 調整に使ったビューポート比(1280x800)を基準に、アスペクト比に比例して
+// 水滴数をスケールする(横長ほど多く、縦長ほど少なく)。
+const DENSITY_REFERENCE_ASPECT = 1280 / 800;
+function computeDensityScale() {
+  const aspect = canvas.width / canvas.height;
+  return Math.min(1.8, Math.max(0.35, aspect / DENSITY_REFERENCE_ASPECT));
+}
+
 window.addEventListener("resize", () => {
   if (resizeCanvas()) initFramebuffers();
 });
@@ -610,11 +622,16 @@ function cubicBiasedRadius(min, max) {
   return min + Math.pow(Math.random(), 3) * (max - min);
 }
 
+// 現在の画面アスペクト比に合わせて、密度が一定に見えるよう水滴数を補正する
+const DENSITY_SCALE = computeDensityScale();
+const EFFECTIVE_MIST_COUNT = Math.round(CONFIG.MIST_COUNT * DENSITY_SCALE);
+const EFFECTIVE_DROP_MAX_COUNT = Math.round(CONFIG.DROP_MAX_COUNT * DENSITY_SCALE);
+
 const drops = [];
 let nextDropId = 1;
 
 function spawnDrop({ x, y, r, momentum = 0, momentumX = 0, parentId = null, isDrip = false }) {
-  if (drops.length >= CONFIG.DROP_MAX_COUNT) return null;
+  if (drops.length >= EFFECTIVE_DROP_MAX_COUNT) return null;
   const drop = {
     id: nextDropId++,
     x,
@@ -653,7 +670,7 @@ function makeMistDrop() {
 }
 
 function seedMistDrops() {
-  for (let i = 0; i < CONFIG.MIST_COUNT; i++) {
+  for (let i = 0; i < EFFECTIVE_MIST_COUNT; i++) {
     mistDrops.push(makeMistDrop());
   }
 }
@@ -845,7 +862,7 @@ function userSplat(x, y, radius, amount) {
   }
 }
 
-const MAX_INSTANCES = CONFIG.MIST_COUNT + CONFIG.DROP_MAX_COUNT;
+const MAX_INSTANCES = EFFECTIVE_MIST_COUNT + EFFECTIVE_DROP_MAX_COUNT;
 const dropInstanceData = new Float32Array(MAX_INSTANCES * 4);
 const dropInstanceBuffer = gl.createBuffer();
 
