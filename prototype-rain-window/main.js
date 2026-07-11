@@ -6,15 +6,8 @@
 // - マスクは時間とともにゆっくり減衰 = 水蒸気で再びガラスが曇っていく
 // - 雨粒は個々に物理シミュレーション(重力で加速して落下・軌跡として小さな滴を
 //   残す・近くの滴と衝突して合体)し、それぞれが背景を屈折させるレンズとして働く。
-//   tympanus.net/Development/RainEffect と webgl.souhonzan.org の実装を参考に、
-//   同じアプローチ(水滴ごとの法線マップ的な屈折 + 合成)を自前のプロシージャル
-//   シェーダーで再構築している(アセット・コードのコピーはしていない)
 // - ページを開くと、手で拭うようなジェスチャーを自動再生してから
-//   ユーザーのドラッグ操作に引き継ぐ(プロトタイプ#1の「なぞり」と同じ手法)
-//
-// 外部アセット読み込み無し(完全プロシージャル)。レンダーターゲットは
-// すべて UNSIGNED_BYTE / RGBA8 のみ使用し、float レンダーターゲットの
-// 互換性問題(プロトタイプ#1で発生)を最初から回避している。
+//   ユーザーのドラッグ操作に引き継ぐ
 // ============================================================================
 
 const canvas = document.getElementById("glcanvas");
@@ -56,25 +49,21 @@ const CONFIG = {
   MASK_RESOLUTION: 640,
   MASK_DECAY: 0.9985, // 拭った跡がゆっくり曇りへ戻る(水蒸気で再び曇る)速度
   MASK_LINEAR_FADE_PER_SEC: 0.035, // 実時間ベースで蓄積し、8bit量子化ステップを跨いだ時だけ反映する。
-  // 少し長めに晴れ間を残し、覗き見た景色への未練を感じさせる速度に。
-  // 半径は実際のUV空間半径(円の境界そのもの)。旧ガウシアン分布と見た目の
-  // 太さを揃えた上でさらに半分にしている。
+  // 半径は実際のUV空間半径(円の境界そのもの)。
   AUTOPLAY_BRUSH_RADIUS: 0.036,
   USER_BRUSH_RADIUS: 0.0308, // ドラッグもクリックと同じ値を使う
   BLUR_ITERATIONS: 3,
   BLUR_PIXEL_RADIUS: 1.6, // 少し強めのフロストで、外の世界との距離感を強調
 
-  // 雨粒シミュレーション(物理ベース、tympanus/souhonzanのレンズ屈折方式を参考)。
-  // Codropsの元記事の設計に倣い、「静的な小粒の結露(mist)」と「物理演算で
-  // 落ちる大粒の雨(drops)」を完全に別のシステムとして持つ。
+  // 「静的な小粒の結露(mist)」と「物理演算で落ちる大粒の雨(drops)」を完全に別のシステムとして持つ。
   WATER_RESOLUTION: 1000,
   DROP_MIN_R: 0.0055, // UV空間(画面高さ基準)での最小半径
   DROP_MAX_R: 0.02, // まれに大粒の「涙」のような雫が生まれるよう少し大きめに
   REFRACTION_STRENGTH: 0.045, // 水滴一つ一つがより強くレンズのように景色を歪める
   METABALL_THRESHOLD: 0.5, // これを超えたfieldの場所が水滴の内側になる(低いほど繋がりやすい)
   METABALL_EDGE_SOFTNESS: 0.08, // しきい値付近の輪郭のなめらかさ
-  EVAPORATION_CHANCE_PER_SEC: 0.15, // 水滴が「蒸発」を始める確率(旧1.2/秒から大幅に抑制)
-  EVAPORATION_RATE_MIN: 0.00015, // 蒸発が始まった後の縮む速さの範囲(旧0.0006〜0.002から抑制)
+  EVAPORATION_CHANCE_PER_SEC: 0.15, // 水滴が「蒸発」を始める確率
+  EVAPORATION_RATE_MIN: 0.00015, // 蒸発が始まった後の縮む速さの範囲
   EVAPORATION_RATE_MAX: 0.0005,
 
   // mist: 常時画面を覆う、動かない小粒の結露。固定数・配列の出し入れ無しで
@@ -87,8 +76,8 @@ const CONFIG = {
   RAIN_SPAWN_Y_MIN: 0.05, // 雨粒は上端から流れてくるのではなく、画面全体にランダムに着弾する
   RAIN_SPAWN_Y_MAX: 1.05,
   TRAIL_RATE: 2.0, // 落下中に軌跡の滴を残す頻度
-  MERGE_DISTANCE_FACTOR: 0.55, // 合体しにくくして小粒のままでいる水滴を主体にする(参考サイト寄り)
-  MERGE_GROWTH_CAP: 10, // 合体しても大きくなりすぎない上限(旧1.4)
+  MERGE_DISTANCE_FACTOR: 0.55, // 合体しにくくして小粒のままでいる水滴を主体にする
+  MERGE_GROWTH_CAP: 10, // 合体しても大きくなりすぎない上限
 
   // 拭った場所に溜まる水滴(指でなぞった跡から垂れ落ちる)
   DRIP_SPAWN_THRESHOLD: 0.03, // これだけの「拭った面積」が溜まるたびに1滴生まれる
@@ -461,10 +450,6 @@ function resizeCanvas() {
 resizeCanvas();
 initFramebuffers();
 
-// 水滴のx,yは画面幅・高さに関わらず単純に0〜1の一様分布だが、半径は画面の
-// 「高さ」基準で決まっている。そのため横長の画面では同じ数の水滴が薄まり、
-// 縦長の画面では同じ数が狭い横幅に押し込まれて密度が上がってしまう。
-// 1画面あたりの水滴の被覆率(面積比)がだいたい一定になるよう、実際に
 // 調整に使ったビューポート比(1280x800)を基準に、アスペクト比に比例して
 // 水滴数をスケールする(横長ほど多く、縦長ほど少なく)。
 const DENSITY_REFERENCE_ASPECT = 1280 / 800;
@@ -604,15 +589,11 @@ function render(t) {
 
 // ----------------------------------------------------------------------------
 // 雨粒シミュレーション
-//
-// tympanus.net/Development/RainEffect (Lucas Bebber / Codrops) と
-// webgl.souhonzan.org の実装から、次のアプローチを参考にした自前の実装:
 //   - 個々の水滴は重力に相当する momentum を持ち、大きいほど加速しやすい
 //   - 落下中は軌跡として、小さく縮小した子滴を後ろに残す
 //   - 近くの水滴同士がある距離まで近づくと合体する(メタボール的な見た目)
 //   - 各水滴は円形SDFから疑似球面レンズの法線と厚みを計算し、
 //     水滴マップ(RG=屈折方向, B=厚み, A=アルファ)にインスタンス描画で書き込む
-// 画像アセットやコードそのものはコピーしておらず、アルゴリズムの設計のみ参考にしている。
 // ----------------------------------------------------------------------------
 function randomRange(min, max) {
   return min + Math.random() * (max - min);
@@ -717,15 +698,6 @@ function updateDrops(dt) {
     const d = drops[i];
     if (d.killed) continue;
 
-    // 小粒でも一定確率で動き出すよう下駄を履かせる(値は控えめにして、小粒の
-    // 大半はしばらく結露の「きめ」として画面に留まるようにしている)。
-    // 雨が画面全体に着弾するようになった今は、この下駄は「いつかは動き出す」
-    // ための保険で、以前ほど大きくする必要はない。
-    // const gainChance = (0.06 + Math.max(0, d.r - CONFIG.DROP_MIN_R * 0.6) * 3.0) * dt;
-    // if (Math.random() < gainChance) {
-    //   d.momentum += Math.random() * (d.r / CONFIG.DROP_MAX_R) * 1.6;
-    // }
-
     if (d.momentum > 0.008) {
       d.lastSpawn += d.momentum * dt * CONFIG.TRAIL_RATE;
       if (d.lastSpawn > d.nextSpawn) {
@@ -759,7 +731,7 @@ function updateDrops(dt) {
 
       // 指で拭った場所に溜まった水滴は、垂れ落ちながら結露も拭っていく。
       // 見た目のインスタンスサイズ(d.r)はそのまま大きく保ちつつ、
-      // 拭う範囲だけはそのCONFIG.DRIP_WIPE_RADIUS_FACTOR倍(既定1/3)に絞る。
+      // 拭う範囲だけはそのCONFIG.DRIP_WIPE_RADIUS_FACTOR倍に絞る。
       if (d.isDrip) {
         const wipeRadius = d.r * CONFIG.DRIP_WIPE_RADIUS_FACTOR;
         splat(d.x, d.y, wipeRadius, CONFIG.DRIP_WIPE_AMOUNT);
@@ -777,11 +749,7 @@ function updateDrops(dt) {
     d.momentumX *= Math.pow(0.6, dt * 60);
   }
 
-  // 近くの水滴との合体判定。以前は「配列で近い6個先まで」を調べる近似だったが、
-  // 水滴が数千個規模に増え、しかも画面全体にランダムに着弾するようになったことで
-  // 配列上の近さと空間的な近さがほぼ無関係になり、本当に隣接している水滴の
-  // ほとんどを見逃すようになっていた。空間グリッドに水滴をバケット分けし、
-  // 同じ/隣接セルだけを調べることで、数が増えても正しく・軽く判定できるようにする。
+  // 近くの水滴との合体判定
   {
     const cellSize = CONFIG.MERGE_DISTANCE_FACTOR * CONFIG.DROP_MAX_R * 2.2;
     const grid = new Map();
@@ -909,8 +877,6 @@ function renderDrops() {
   }
 
   // パス1: 各水滴のなめらかな距離場(field)を加算ブレンドで蓄積する。
-  // MAXではなくADD(加算)にすることで、近くの水滴同士のfieldが足し合わさり、
-  // 重なった場所ほど値が高くなる — これがメタボールの基本原理。
   gl.viewport(0, 0, dropFieldFBO.width, dropFieldFBO.height);
   gl.bindFramebuffer(gl.FRAMEBUFFER, dropFieldFBO.fbo);
   gl.clearColor(0, 0, 0, 0);
@@ -1057,10 +1023,7 @@ function stopAutoplayForUser() {
   hint.classList.add("faded");
 }
 
-// ドラッグ中に pointermove のたびに無条件でsplatすると、ゆっくり動かした時に
-// 同じような場所へ何度も重ね塗りしてしまい、単発クリックより実質的に太い
-// ストロークになってしまう(滲みが加算されるため)。移動距離に応じて一定間隔
-// おきに補間しながらsplatすることで、ドラッグの速さによらず太さを揃える。
+// 移動距離に応じて一定間隔おきに補間しながらsplatすることで、ドラッグの速さによらず太さを揃える。
 const BRUSH_SPACING = CONFIG.USER_BRUSH_RADIUS * 0.5;
 
 function splatAlongSegment(x0, y0, x1, y1, radius, amount) {
