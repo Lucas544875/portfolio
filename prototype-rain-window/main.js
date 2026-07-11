@@ -55,29 +55,45 @@ const CONFIG = {
   BLUR_RESOLUTION: 220, // シーンよりずっと低い解像度でブラーすることで、強いフロスト感を安く出す
   MASK_RESOLUTION: 640,
   MASK_DECAY: 0.9985, // 拭った跡がゆっくり曇りへ戻る(水蒸気で再び曇る)速度
-  MASK_LINEAR_FADE_PER_SEC: 0.05, // 実時間ベースで蓄積し、8bit量子化ステップを跨いだ時だけ反映する
+  MASK_LINEAR_FADE_PER_SEC: 0.035, // 実時間ベースで蓄積し、8bit量子化ステップを跨いだ時だけ反映する。
+  // 少し長めに晴れ間を残し、覗き見た景色への未練を感じさせる速度に。
   // 半径は実際のUV空間半径(円の境界そのもの)。旧ガウシアン分布と見た目の
   // 太さを揃えた上でさらに半分にしている。
   AUTOPLAY_BRUSH_RADIUS: 0.036,
   USER_BRUSH_RADIUS: 0.0408, // ドラッグもクリックと同じ値を使う
   BLUR_ITERATIONS: 3,
-  BLUR_PIXEL_RADIUS: 1.6,
+  BLUR_PIXEL_RADIUS: 1.6, // 少し強めのフロストで、外の世界との距離感を強調
 
-  // 雨粒シミュレーション(物理ベース、tympanus/souhonzanのレンズ屈折方式を参考)
+  // 雨粒シミュレーション(物理ベース、tympanus/souhonzanのレンズ屈折方式を参考)。
+  // Codropsの元記事の設計に倣い、「静的な小粒の結露(mist)」と「物理演算で
+  // 落ちる大粒の雨(drops)」を完全に別のシステムとして持つ。
   WATER_RESOLUTION: 1000,
-  DROP_MAX_COUNT: 420,
-  DROP_AMBIENT_MIN: 150, // 常時維持する(主に静止した)水滴の最低数
   DROP_MIN_R: 0.0055, // UV空間(画面高さ基準)での最小半径
-  DROP_MAX_R: 0.020,
-  RAIN_SPAWN_PER_SEC: 20, // 新しい雨粒が上から降ってくる頻度
-  TRAIL_RATE: 2.2, // 落下中に軌跡の滴を残す頻度
-  MERGE_DISTANCE_FACTOR: 0.9, // 近くの滴同士が合体する距離のしきい値
-  REFRACTION_STRENGTH: 0.045,
+  DROP_MAX_R: 0.016, // まれに大粒の「涙」のような雫が生まれるよう少し大きめに
+  REFRACTION_STRENGTH: 0.045, // 水滴一つ一つがより強くレンズのように景色を歪める
+  METABALL_THRESHOLD: 0.5, // これを超えたfieldの場所が水滴の内側になる(低いほど繋がりやすい)
+  METABALL_EDGE_SOFTNESS: 0.08, // しきい値付近の輪郭のなめらかさ
+  EVAPORATION_CHANCE_PER_SEC: 0.15, // 水滴が「蒸発」を始める確率(旧1.2/秒から大幅に抑制)
+  EVAPORATION_RATE_MIN: 0.00015, // 蒸発が始まった後の縮む速さの範囲(旧0.0006〜0.002から抑制)
+  EVAPORATION_RATE_MAX: 0.0005,
+
+  // mist: 常時画面を覆う、動かない小粒の結露。固定数・配列の出し入れ無しで
+  // 蒸発したその場に生まれ変わるだけなので、数が多くても軽い。
+  MIST_COUNT: 3000,
+
+  // drops: 重力で落ちる大粒の雨。物理演算(加速・軌跡・合体)はこちらだけが持つ。
+  DROP_MAX_COUNT: 500, // mistが土台の密度を担うので、こちらは動きのある粒だけで十分
+  RAIN_SPAWN_PER_SEC: 40, // DROP_MAX_COUNTに達したらこれ以上増えても見た目は変わらない
+  RAIN_SPAWN_Y_MIN: 0.05, // 雨粒は上端から流れてくるのではなく、画面全体にランダムに着弾する
+  RAIN_SPAWN_Y_MAX: 1.05,
+  TRAIL_RATE: 2.0, // 落下中に軌跡の滴を残す頻度
+  MERGE_DISTANCE_FACTOR: 0.55, // 合体しにくくして小粒のままでいる水滴を主体にする(参考サイト寄り)
+  MERGE_GROWTH_CAP: 0.7, // 合体しても大きくなりすぎない上限(旧1.4)
 
   // 拭った場所に溜まる水滴(指でなぞった跡から垂れ落ちる)
-  DRIP_SPAWN_THRESHOLD: 0.045, // これだけの「拭った面積」が溜まるたびに1滴生まれる
+  DRIP_SPAWN_THRESHOLD: 0.05, // これだけの「拭った面積」が溜まるたびに1滴生まれる
   DRIP_INITIAL_R: 0.022 / 3,
-  DRIP_INITIAL_MOMENTUM: 0.1, // 溜まった水がすでに重みで滑り始めている状態からスタート
+  DRIP_INITIAL_MOMENTUM: 0.06, // 涙のように、溜まってからためらいがちに滑り出す
   DRIP_WIPE_AMOUNT: 1.0,
 };
 
@@ -202,8 +218,10 @@ const blurShader = `#version 300 es
 `;
 
 // 雨粒1つを、インスタンス化された矩形(=水滴の外接ボックス)として描画する。
-// フラグメントシェーダー側で円形のSDFから疑似的な球面レンズの法線・厚みを
-// 計算し、水滴マップ(R=屈折X, G=屈折Y, B=厚み, A=アルファ)に書き込む。
+// 直接レンズ形状を書き込むのではなく、まず「なめらかな距離場(field)」を
+// 加算ブレンドで蓄積し(このパス)、別パスでしきい値化して初めて最終的な
+// 輪郭・屈折を決める。これにより、まだ物理的には合体していない近くの水滴
+// 同士も、距離場が重なる場所でなめらかに繋がる(本来のメタボール表現)。
 const dropVertexShader = `#version 300 es
   precision highp float;
   layout(location = 0) in vec2 aQuad;
@@ -216,17 +234,43 @@ const dropVertexShader = `#version 300 es
   }
 `;
 
-const dropFragmentShader = `#version 300 es
+const dropFieldFragmentShader = `#version 300 es
   precision highp float;
   in vec2 vLocal;
   out vec4 fragColor;
   void main () {
-    float d = length(vLocal);
-    if (d > 1.0) discard;
-    float nz = sqrt(max(0.0, 1.0 - d * d));
-    vec2 refraction = vLocal * (1.0 - nz);
-    float thickness = nz;
-    float alpha = smoothstep(1.0, 0.8, d);
+    float d2 = dot(vLocal, vLocal);
+    if (d2 > 1.0) discard;
+    float field = (1.0 - d2) * (1.0 - d2);
+    fragColor = vec4(field, 0.0, 0.0, 0.0);
+  }
+`;
+
+// fieldを読み、しきい値を境に「水滴の中/外」を決める(メタボールの本体)。
+// 屈折方向は、隣接テクセルとのfieldの差(勾配)から求める。これにより、
+// 合体していない水滴同士が繋がった「首」の部分でも、勾配がなめらかに
+// つながった自然な屈折になる。
+const metaballResolveShader = `#version 300 es
+  precision highp float;
+  in vec2 vUv;
+  uniform sampler2D uField;
+  uniform vec2 uTexelSize;
+  uniform float uThreshold;
+  uniform float uEdgeSoftness;
+  out vec4 fragColor;
+  void main () {
+    float f = texture(uField, vUv).r;
+    float alpha = smoothstep(uThreshold - uEdgeSoftness, uThreshold + uEdgeSoftness, f);
+
+    float fL = texture(uField, vUv - vec2(uTexelSize.x, 0.0)).r;
+    float fR = texture(uField, vUv + vec2(uTexelSize.x, 0.0)).r;
+    float fB = texture(uField, vUv - vec2(0.0, uTexelSize.y)).r;
+    float fT = texture(uField, vUv + vec2(0.0, uTexelSize.y)).r;
+    vec2 grad = vec2(fR - fL, fT - fB);
+    vec2 refraction = clamp(grad * 3.5, -1.0, 1.0);
+
+    float thickness = clamp(f, 0.0, 1.0);
+
     fragColor = vec4(refraction * 0.5 + 0.5, thickness, alpha);
   }
 `;
@@ -308,9 +352,6 @@ const displayShader = `#version 300 es
     vec3 dropColor = texture(uScene, refractedUv).rgb * (0.82 + thickness * 0.4);
     composite = mix(composite, dropColor, dropAlpha * 0.92);
 
-    float vig = smoothstep(1.15, 0.3, length(uv - 0.5) * 1.35);
-    composite *= mix(0.55, 1.0, vig);
-
     fragColor = vec4(composite, 1.0);
   }
 `;
@@ -320,7 +361,8 @@ const blurProgram = createProgram(baseVertexShader, blurShader);
 const splatProgram = createProgram(baseVertexShader, splatShader);
 const decayProgram = createProgram(baseVertexShader, decayShader);
 const displayProgram = createProgram(baseVertexShader, displayShader);
-const dropProgram = createProgram(dropVertexShader, dropFragmentShader);
+const dropFieldProgram = createProgram(dropVertexShader, dropFieldFragmentShader);
+const metaballResolveProgram = createProgram(baseVertexShader, metaballResolveShader);
 
 // ----------------------------------------------------------------------------
 // Framebuffers (all RGBA8 / UNSIGNED_BYTE — universally supported render targets)
@@ -387,7 +429,7 @@ function getResolution(resolution) {
   return { width: min, height: max };
 }
 
-let sceneFBO, blurTempFBO, blurredSceneFBO, mask, waterMapFBO;
+let sceneFBO, blurTempFBO, blurredSceneFBO, mask, waterMapFBO, dropFieldFBO;
 
 function initFramebuffers() {
   const sceneRes = getResolution(CONFIG.SCENE_RESOLUTION);
@@ -400,6 +442,7 @@ function initFramebuffers() {
   blurredSceneFBO = createFBO(blurRes.width, blurRes.height, gl.LINEAR);
   mask = createDoubleFBO(maskRes.width, maskRes.height, gl.LINEAR);
   waterMapFBO = createFBO(waterRes.width, waterRes.height, gl.LINEAR);
+  dropFieldFBO = createFBO(waterRes.width, waterRes.height, gl.LINEAR);
 }
 
 function resizeCanvas() {
@@ -590,16 +633,52 @@ function spawnDrop({ x, y, r, momentum = 0, momentumX = 0, parentId = null, isDr
   return drop;
 }
 
-function seedInitialDrops() {
-  for (let i = 0; i < CONFIG.DROP_AMBIENT_MIN; i++) {
-    spawnDrop({
-      x: Math.random(),
-      y: Math.random(),
-      r: randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2.2),
-    });
+// ----------------------------------------------------------------------------
+// mist: 常時画面を覆う、動かない小粒の結露。
+// dropsとは完全に別の配列・別の更新ロジックで、物理演算(合体・軌跡・重力)を
+// 一切持たない。固定長の配列を使い回し、蒸発したら同じスロットで別の場所に
+// 生まれ変わるだけなので、数が多くても(数千個でも)非常に軽い。
+// ----------------------------------------------------------------------------
+const mistDrops = [];
+
+function makeMistDrop() {
+  return {
+    x: Math.random(),
+    y: Math.random(),
+    r: randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2.2),
+    shrink: 0,
+    shrinking: false,
+  };
+}
+
+function seedMistDrops() {
+  for (let i = 0; i < CONFIG.MIST_COUNT; i++) {
+    mistDrops.push(makeMistDrop());
   }
 }
-seedInitialDrops();
+seedMistDrops();
+
+function updateMistDrops(dt) {
+  for (let i = 0; i < mistDrops.length; i++) {
+    const d = mistDrops[i];
+    if (!d.shrinking) {
+      if (Math.random() < CONFIG.EVAPORATION_CHANCE_PER_SEC * dt) {
+        d.shrinking = true;
+        d.shrink = randomRange(CONFIG.EVAPORATION_RATE_MIN, CONFIG.EVAPORATION_RATE_MAX);
+      }
+      continue;
+    }
+    d.r -= d.shrink * dt;
+    if (d.r <= CONFIG.DROP_MIN_R * 0.25) {
+      // 蒸発しきったら、配列の出し入れはせず同じスロットで別の場所に生まれ変わる
+      d.x = Math.random();
+      d.y = Math.random();
+      d.r = randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2.2);
+      d.shrink = 0;
+      d.shrinking = false;
+    }
+  }
+}
 
 let rainSpawnAccumulator = 0;
 
@@ -610,7 +689,7 @@ function updateDrops(dt) {
     const r = cubicBiasedRadius(CONFIG.DROP_MIN_R, CONFIG.DROP_MAX_R);
     spawnDrop({
       x: Math.random(),
-      y: 1.02 + Math.random() * 0.04,
+      y: randomRange(CONFIG.RAIN_SPAWN_Y_MIN, CONFIG.RAIN_SPAWN_Y_MAX),
       r,
       momentum: 0.09 + (r / CONFIG.DROP_MAX_R) * 0.22 + Math.random() * 0.06,
     });
@@ -620,10 +699,14 @@ function updateDrops(dt) {
     const d = drops[i];
     if (d.killed) continue;
 
-    const gainChance = Math.max(0, d.r - CONFIG.DROP_MIN_R * 0.6) * 3.0 * dt;
-    if (Math.random() < gainChance) {
-      d.momentum += Math.random() * (d.r / CONFIG.DROP_MAX_R) * 1.6;
-    }
+    // 小粒でも一定確率で動き出すよう下駄を履かせる(値は控えめにして、小粒の
+    // 大半はしばらく結露の「きめ」として画面に留まるようにしている)。
+    // 雨が画面全体に着弾するようになった今は、この下駄は「いつかは動き出す」
+    // ための保険で、以前ほど大きくする必要はない。
+    // const gainChance = (0.06 + Math.max(0, d.r - CONFIG.DROP_MIN_R * 0.6) * 3.0) * dt;
+    // if (Math.random() < gainChance) {
+    //   d.momentum += Math.random() * (d.r / CONFIG.DROP_MAX_R) * 1.6;
+    // }
 
     if (d.momentum > 0.008) {
       d.lastSpawn += d.momentum * dt * CONFIG.TRAIL_RATE;
@@ -639,8 +722,8 @@ function updateDrops(dt) {
         d.lastSpawn = 0;
         d.nextSpawn = randomRange(0.02, 0.06);
       }
-    } else if (Math.random() < 0.02 * dt * 60) {
-      d.shrink = randomRange(0.0006, 0.002);
+    } else if (Math.random() < CONFIG.EVAPORATION_CHANCE_PER_SEC * dt) {
+      d.shrink = randomRange(CONFIG.EVAPORATION_RATE_MIN, CONFIG.EVAPORATION_RATE_MAX);
     }
 
     d.r -= d.shrink * dt;
@@ -654,7 +737,7 @@ function updateDrops(dt) {
     if (d.momentum > 0) {
       d.y -= d.momentum * dt;
       d.x += d.momentumX * dt;
-      d.spreadY = 1.0 + Math.min(2.2, d.momentum * 6.0);
+      d.spreadY = 1.0 +  d.momentum * 6.0;
 
       // 指で拭った場所に溜まった水滴は、垂れ落ちながら結露も拭っていく。
       // 拭う太さは水滴自体の現在の大きさ(d.r)に合わせる。
@@ -668,44 +751,64 @@ function updateDrops(dt) {
       }
     }
 
-    d.momentum -= Math.max(0.02, d.momentum * 0.6) * dt;
+    // 摩擦を弱め、一度動き出したら画面を最後まで滑り落ちていく余韻を持たせる
+    d.momentum -= Math.max(0.1, d.momentum * 0.6) * dt;
     if (d.momentum < 0) d.momentum = 0;
     d.momentumX *= Math.pow(0.6, dt * 60);
   }
 
-  // 近くの水滴との簡易な合体判定(配列内で近い順に並んでいる前提はしないため
-  // 数個先までの総当たりで十分な見た目のメタボール的マージを再現する)
-  for (let i = 0; i < drops.length; i++) {
-    const a = drops[i];
-    if (a.killed) continue;
-    for (let k = 1; k <= 6 && i + k < drops.length; k++) {
-      const b = drops[i + k];
-      if (b.killed) continue;
-      if (a.parentId === b.id || b.parentId === a.id) continue;
-      // 拭った跡の水滴は外の雨粒と混ざらず、独立して動くようにする
-      if (a.isDrip !== b.isDrip) continue;
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      const rSum = (a.r + b.r) * CONFIG.MERGE_DISTANCE_FACTOR;
-      if (dx * dx + dy * dy < rSum * rSum) {
-        const big = a.r >= b.r ? a : b;
-        const small = a.r >= b.r ? b : a;
-        big.r = Math.min(CONFIG.DROP_MAX_R * 1.4, Math.sqrt(big.r * big.r + small.r * small.r * 0.8));
-        big.momentum = Math.max(big.momentum, small.momentum, Math.min(0.6, big.momentum + 0.05));
-        small.killed = true;
+  // 近くの水滴との合体判定。以前は「配列で近い6個先まで」を調べる近似だったが、
+  // 水滴が数千個規模に増え、しかも画面全体にランダムに着弾するようになったことで
+  // 配列上の近さと空間的な近さがほぼ無関係になり、本当に隣接している水滴の
+  // ほとんどを見逃すようになっていた。空間グリッドに水滴をバケット分けし、
+  // 同じ/隣接セルだけを調べることで、数が増えても正しく・軽く判定できるようにする。
+  {
+    const cellSize = CONFIG.MERGE_DISTANCE_FACTOR * CONFIG.DROP_MAX_R * 2.2;
+    const grid = new Map();
+    for (const d of drops) {
+      if (d.killed) continue;
+      const key = `${Math.floor(d.x / cellSize)},${Math.floor(d.y / cellSize)}`;
+      let bucket = grid.get(key);
+      if (!bucket) {
+        bucket = [];
+        grid.set(key, bucket);
+      }
+      bucket.push(d);
+    }
+
+    for (const a of drops) {
+      if (a.killed) continue;
+      const cx = Math.floor(a.x / cellSize);
+      const cy = Math.floor(a.y / cellSize);
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const bucket = grid.get(`${cx + ox},${cy + oy}`);
+          if (!bucket) continue;
+          for (const b of bucket) {
+            if (b.killed || a.id >= b.id) continue;
+            if (a.parentId === b.id || b.parentId === a.id) continue;
+            // 拭った跡の水滴は外の雨粒と混ざらず、独立して動くようにする
+            if (a.isDrip !== b.isDrip) continue;
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const rSum = (a.r + b.r) * CONFIG.MERGE_DISTANCE_FACTOR;
+            if (dx * dx + dy * dy < rSum * rSum) {
+              const big = a.r >= b.r ? a : b;
+              const small = a.r >= b.r ? b : a;
+              big.r = Math.min(CONFIG.DROP_MAX_R * CONFIG.MERGE_GROWTH_CAP, Math.sqrt(big.r * big.r + small.r * small.r * 0.8));
+              big.momentum = Math.max(big.momentum, small.momentum, Math.min(0.6, big.momentum + 0.05));
+              small.killed = true;
+            }
+          }
+        }
       }
     }
   }
 
+  // 常時一定数を維持する処理は無い。密度の土台はmistが担い、dropsは
+  // 雨として降ってくる分・その軌跡・拭った跡の水滴だけで構成される。
   for (let i = drops.length - 1; i >= 0; i--) {
     if (drops[i].killed) drops.splice(i, 1);
-  }
-  while (drops.length < CONFIG.DROP_AMBIENT_MIN) {
-    spawnDrop({
-      x: Math.random(),
-      y: Math.random(),
-      r: randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2),
-    });
   }
 }
 
@@ -739,7 +842,8 @@ function userSplat(x, y, radius, amount) {
   }
 }
 
-const dropInstanceData = new Float32Array(CONFIG.DROP_MAX_COUNT * 4);
+const MAX_INSTANCES = CONFIG.MIST_COUNT + CONFIG.DROP_MAX_COUNT;
+const dropInstanceData = new Float32Array(MAX_INSTANCES * 4);
 const dropInstanceBuffer = gl.createBuffer();
 
 const dropVAO = gl.createVertexArray();
@@ -758,7 +862,21 @@ gl.bindVertexArray(null);
 function renderDrops() {
   const aspect = canvas.width / canvas.height;
   let n = 0;
-  for (let i = 0; i < drops.length && n < CONFIG.DROP_MAX_COUNT; i++) {
+
+  // mist: 常時画面を覆う静的な小粒。雨の描写トグルに従う
+  if (effects.rain) {
+    for (let i = 0; i < mistDrops.length && n < MAX_INSTANCES; i++) {
+      const d = mistDrops[i];
+      dropInstanceData[n * 4 + 0] = d.x;
+      dropInstanceData[n * 4 + 1] = d.y;
+      dropInstanceData[n * 4 + 2] = d.r / aspect;
+      dropInstanceData[n * 4 + 3] = d.r;
+      n++;
+    }
+  }
+
+  // drops: 重力で落ちる大粒の雨・拭った跡から垂れる水滴
+  for (let i = 0; i < drops.length && n < MAX_INSTANCES; i++) {
     const d = drops[i];
     if (d.killed) continue;
     // 「拭った跡から垂れる水滴」は結露の描写、それ以外(外の雨)は雨の描写のトグルに従う
@@ -770,9 +888,12 @@ function renderDrops() {
     n++;
   }
 
-  gl.viewport(0, 0, waterMapFBO.width, waterMapFBO.height);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, waterMapFBO.fbo);
-  gl.clearColor(0.5, 0.5, 0.0, 0.0);
+  // パス1: 各水滴のなめらかな距離場(field)を加算ブレンドで蓄積する。
+  // MAXではなくADD(加算)にすることで、近くの水滴同士のfieldが足し合わさり、
+  // 重なった場所ほど値が高くなる — これがメタボールの基本原理。
+  gl.viewport(0, 0, dropFieldFBO.width, dropFieldFBO.height);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dropFieldFBO.fbo);
+  gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   if (n > 0) {
@@ -780,17 +901,26 @@ function renderDrops() {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, dropInstanceData.subarray(0, n * 4));
 
     gl.enable(gl.BLEND);
-    gl.blendEquation(gl.MAX);
+    gl.blendEquation(gl.FUNC_ADD);
     gl.blendFunc(gl.ONE, gl.ONE);
 
-    useProgram(dropProgram);
+    useProgram(dropFieldProgram);
     gl.bindVertexArray(dropVAO);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
     gl.bindVertexArray(null);
 
     gl.disable(gl.BLEND);
-    gl.blendEquation(gl.FUNC_ADD);
   }
+
+  // パス2: 蓄積したfieldをしきい値化して、初めて水滴の輪郭・屈折方向が決まる。
+  // 合体していない近くの水滴同士も、fieldが重なる場所ではなめらかに繋がる。
+  gl.viewport(0, 0, waterMapFBO.width, waterMapFBO.height);
+  const u = useProgram(metaballResolveProgram);
+  gl.uniform1i(u.uField, dropFieldFBO.attach(0));
+  gl.uniform2f(u.uTexelSize, dropFieldFBO.texelSizeX, dropFieldFBO.texelSizeY);
+  gl.uniform1f(u.uThreshold, CONFIG.METABALL_THRESHOLD);
+  gl.uniform1f(u.uEdgeSoftness, CONFIG.METABALL_EDGE_SOFTNESS);
+  blit(waterMapFBO.fbo);
 }
 
 // ----------------------------------------------------------------------------
@@ -983,10 +1113,12 @@ function frame() {
   }
 
   try {
+    updateMistDrops(dt);
     updateDrops(dt);
     renderDrops();
   } catch (err) {
     console.error("Raindrop simulation step failed — window still renders without rain:", err);
+    updateMistDrops = () => {};
     updateDrops = () => {};
     renderDrops = () => {};
   }
