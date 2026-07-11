@@ -60,6 +60,12 @@ const CONFIG = {
   TRAIL_RATE: 2.2, // 落下中に軌跡の滴を残す頻度
   MERGE_DISTANCE_FACTOR: 0.9, // 近くの滴同士が合体する距離のしきい値
   REFRACTION_STRENGTH: 0.045,
+
+  // 拭った場所に溜まる水滴(指でなぞった跡から垂れ落ちる)
+  DRIP_SPAWN_THRESHOLD: 0.045, // これだけの「拭った面積」が溜まるたびに1滴生まれる
+  DRIP_INITIAL_R: 0.022 / 3,
+  DRIP_INITIAL_MOMENTUM: 0.1, // 溜まった水がすでに重みで滑り始めている状態からスタート
+  DRIP_WIPE_AMOUNT: 1.0,
 };
 
 // ----------------------------------------------------------------------------
@@ -132,62 +138,31 @@ const baseVertexShader = `#version 300 es
 const sceneShader = `#version 300 es
   precision highp float;
   in vec2 vUv;
-  uniform float uTime;
+  uniform sampler2D uBgImage;
   uniform vec2 uResolution;
+  uniform float uImageAspect;
+  uniform float uImageLoaded;
   out vec4 fragColor;
-
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-  }
-  vec2 hash22(vec2 p) {
-    return vec2(hash21(p), hash21(p + 17.17));
-  }
 
   void main () {
     vec2 uv = vUv;
-    float aspect = uResolution.x / uResolution.y;
+    float screenAspect = uResolution.x / uResolution.y;
 
-    vec3 skyTop = vec3(0.015, 0.02, 0.05);
-    vec3 skyHorizon = vec3(0.09, 0.06, 0.10);
-    vec3 sky = mix(skyHorizon, skyTop, smoothstep(0.0, 0.85, uv.y));
+    // CSSのbackground-size:coverと同じ考え方で、画像のアスペクト比を保ったまま
+    // 画面いっぱいにクロップする(引き伸ばして歪ませない)。
+    vec2 ratio = vec2(
+      min(screenAspect / uImageAspect, 1.0),
+      min(uImageAspect / screenAspect, 1.0)
+    );
+    vec2 uvCover = vec2(
+      uv.x * ratio.x + (1.0 - ratio.x) * 0.5,
+      uv.y * ratio.y + (1.0 - ratio.y) * 0.5
+    );
 
-    float starField = hash21(floor(uv * vec2(400.0, 300.0)));
-    float stars = step(0.996, starField) * smoothstep(0.35, 1.0, uv.y);
-    sky += stars * vec3(0.8, 0.85, 0.95);
-
-    vec3 bokeh = vec3(0.0);
-    for (int i = 0; i < 14; i++) {
-      float fi = float(i);
-      vec2 seed = vec2(fi * 13.7, fi * 7.3);
-      vec2 pos = hash22(seed);
-      pos.y *= 0.55;
-      vec2 d = uv - pos;
-      d.x *= aspect;
-      float r = mix(0.012, 0.05, hash21(seed + 3.1));
-      float glow = smoothstep(r, 0.0, length(d));
-      float flicker = 0.75 + 0.25 * sin(uTime * mix(0.6, 1.8, hash21(seed + 9.0)) + fi * 3.0);
-      vec3 warmCool = mix(vec3(1.0, 0.75, 0.4), vec3(0.55, 0.75, 1.0), hash21(seed + 5.0));
-      bokeh += warmCool * glow * flicker * 0.9;
-    }
-
-    float bx = uv.x * 22.0;
-    float col = floor(bx);
-    float bh = 0.10 + hash21(vec2(col, 1.0)) * 0.30;
-    float building = step(uv.y, bh);
-
-    vec2 wCell = vec2(floor(bx * 6.0), floor(uv.y / 0.028));
-    float wx = fract(bx * 6.0);
-    float wy = fract(uv.y / 0.028);
-    float isWindowSlot = step(0.18, wx) * step(wx, 0.82) * step(0.15, wy) * step(wy, 0.85);
-    float lit = step(0.55, hash21(wCell + col));
-    float winFlicker = 0.85 + 0.15 * sin(uTime * 0.7 + hash21(wCell) * 40.0);
-    vec3 windowColor = mix(vec3(1.0, 0.78, 0.42), vec3(0.6, 0.8, 1.0), hash21(wCell + col + 8.0) * 0.3);
-    vec3 windows = windowColor * isWindowSlot * lit * winFlicker;
-
-    vec3 buildingColor = vec3(0.008, 0.01, 0.018) + windows;
-    vec3 color = mix(sky + bokeh, buildingColor, building);
+    vec3 color = texture(uBgImage, uvCover).rgb;
+    // 画像読み込み前は暗いプレースホルダーにフォールバックし、
+    // 読み込み完了まで空白/エラーにならないようにする。
+    color = mix(vec3(0.02, 0.025, 0.045), color, uImageLoaded);
 
     fragColor = vec4(color, 1.0);
   }
@@ -433,11 +408,44 @@ window.addEventListener("resize", () => {
 // ----------------------------------------------------------------------------
 // Passes
 // ----------------------------------------------------------------------------
-function renderScene(t) {
+let bgImageTexture = null;
+let bgImageAspect = 640 / 427;
+let bgImageLoaded = false;
+
+function loadBackgroundImage(url) {
+  const img = new Image();
+  img.onload = () => {
+    bgImageAspect = img.naturalWidth / img.naturalHeight;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    bgImageTexture = tex;
+    bgImageLoaded = true;
+  };
+  img.onerror = () => {
+    console.error(`Failed to load background image ${url} — showing dark placeholder instead.`);
+  };
+  img.src = url;
+}
+loadBackgroundImage("./assets/background1.jpg");
+
+function renderScene() {
   gl.viewport(0, 0, sceneFBO.width, sceneFBO.height);
   const u = useProgram(sceneProgram);
-  gl.uniform1f(u.uTime, t);
   gl.uniform2f(u.uResolution, sceneFBO.width, sceneFBO.height);
+  gl.uniform1f(u.uImageAspect, bgImageAspect);
+  gl.uniform1f(u.uImageLoaded, bgImageLoaded ? 1.0 : 0.0);
+  if (bgImageTexture) {
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, bgImageTexture);
+    gl.uniform1i(u.uBgImage, 0);
+  }
   blit(sceneFBO.fbo);
 }
 
@@ -544,7 +552,7 @@ function cubicBiasedRadius(min, max) {
 const drops = [];
 let nextDropId = 1;
 
-function spawnDrop({ x, y, r, momentum = 0, momentumX = 0, parentId = null }) {
+function spawnDrop({ x, y, r, momentum = 0, momentumX = 0, parentId = null, isDrip = false }) {
   if (drops.length >= CONFIG.DROP_MAX_COUNT) return null;
   const drop = {
     id: nextDropId++,
@@ -558,6 +566,7 @@ function spawnDrop({ x, y, r, momentum = 0, momentumX = 0, parentId = null }) {
     lastSpawn: 0,
     nextSpawn: randomRange(0.02, 0.06),
     parentId,
+    isDrip,
     killed: false,
   };
   drops.push(drop);
@@ -607,6 +616,7 @@ function updateDrops(dt) {
           y: d.y + d.r * 0.3,
           r: d.r * randomRange(0.25, 0.45),
           parentId: d.id,
+          isDrip: d.isDrip,
         });
         d.r *= 0.985;
         d.lastSpawn = 0;
@@ -628,6 +638,13 @@ function updateDrops(dt) {
       d.y -= d.momentum * dt;
       d.x += d.momentumX * dt;
       d.spreadY = 1.0 + Math.min(2.2, d.momentum * 6.0);
+
+      // 指で拭った場所に溜まった水滴は、垂れ落ちながら結露も拭っていく。
+      // 拭う太さは水滴自体の現在の大きさ(d.r)に合わせる。
+      if (d.isDrip) {
+        splat(d.x, d.y, d.r, CONFIG.DRIP_WIPE_AMOUNT);
+      }
+
       if (d.y < -0.06) {
         d.killed = true;
         continue;
@@ -648,6 +665,8 @@ function updateDrops(dt) {
       const b = drops[i + k];
       if (b.killed) continue;
       if (a.parentId === b.id || b.parentId === a.id) continue;
+      // 拭った跡の水滴は外の雨粒と混ざらず、独立して動くようにする
+      if (a.isDrip !== b.isDrip) continue;
       const dx = a.x - b.x;
       const dy = a.y - b.y;
       const rSum = (a.r + b.r) * CONFIG.MERGE_DISTANCE_FACTOR;
@@ -670,6 +689,36 @@ function updateDrops(dt) {
       y: Math.random(),
       r: randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2),
     });
+  }
+}
+
+// 拭った面積に応じて水が溜まっていき、しきい値を超えると水滴として生まれ落ちる。
+// 生まれた水滴は他の雨粒と同じ物理(重力・軌跡・合体)に従うが、指の跡を追加で
+// 拭うことはしない — instead 落下しながら "isDrip" フラグを見て自らマスクを拭う
+// (updateDrops内)。手で拭う操作(splat)だけがこの蓄積に寄与し、水滴自身が
+// 落下中に拭うぶんはカウントしない(そうしないと無限に増殖してしまう)。
+let dripWetnessAccumulator = 0;
+let lastWipeX = 0.5;
+let lastWipeY = 0.5;
+
+function spawnDrip(x, y) {
+  spawnDrop({
+    x: x + (Math.random() - 0.5) * 0.015,
+    y: y - 0.004,
+    r: CONFIG.DRIP_INITIAL_R * randomRange(0.8, 1.3),
+    momentum: CONFIG.DRIP_INITIAL_MOMENTUM * randomRange(0.7, 1.2),
+    isDrip: true,
+  });
+}
+
+function userSplat(x, y, radius, amount) {
+  splat(x, y, radius, amount);
+  lastWipeX = x;
+  lastWipeY = y;
+  dripWetnessAccumulator += radius * radius;
+  while (dripWetnessAccumulator >= CONFIG.DRIP_SPAWN_THRESHOLD) {
+    dripWetnessAccumulator -= CONFIG.DRIP_SPAWN_THRESHOLD;
+    spawnDrip(lastWipeX, lastWipeY);
   }
 }
 
@@ -810,7 +859,7 @@ function updateAutoplay(dt) {
   }
 
   const pt = stroke[autoplay.pointIndex];
-  splat(pt.x, pt.y, CONFIG.AUTOPLAY_BRUSH_RADIUS, 1.0);
+  userSplat(pt.x, pt.y, CONFIG.AUTOPLAY_BRUSH_RADIUS, 1.0);
   setFingerCursor(pt.x * window.innerWidth, (1 - pt.y) * window.innerHeight, 0.9);
 
   if (autoplay.pointIndex >= stroke.length - 1) {
@@ -852,7 +901,7 @@ function splatAlongSegment(x0, y0, x1, y1, radius, amount) {
   const steps = Math.max(1, Math.round(dist / BRUSH_SPACING));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    splat(x0 + dx * t, y0 + dy * t, radius, amount);
+    userSplat(x0 + dx * t, y0 + dy * t, radius, amount);
   }
 }
 
@@ -862,7 +911,7 @@ function handlePointerDown(clientX, clientY) {
   pointerState.down = true;
   pointerState.lastX = u;
   pointerState.lastY = v;
-  splat(u, v, CONFIG.USER_BRUSH_RADIUS, 1.0);
+  userSplat(u, v, CONFIG.USER_BRUSH_RADIUS, 1.0);
   setFingerCursor(clientX, clientY, 1.0);
 }
 
@@ -924,7 +973,7 @@ function frame() {
   }
 
   decayMask(dt);
-  renderScene(t);
+  renderScene();
   renderBlur();
   render(t);
 
