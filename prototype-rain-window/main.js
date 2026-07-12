@@ -71,7 +71,7 @@ const CONFIG = {
   MIST_COUNT: 3000,
 
   // drops: 重力で落ちる大粒の雨。物理演算(加速・軌跡・合体)はこちらだけが持つ。
-  DROP_MAX_COUNT: 10000, // mistが土台の密度を担うので、こちらは動きのある粒だけで十分
+  DROP_MAX_COUNT: 1000, // mistが土台の密度を担うので、こちらは動きのある粒だけで十分
   RAIN_SPAWN_PER_SEC: 30, // DROP_MAX_COUNTに達したらこれ以上増えても見た目は変わらない
   RAIN_SPAWN_Y_MIN: 0.05, // 雨粒は上端から流れてくるのではなく、画面全体にランダムに着弾する
   RAIN_SPAWN_Y_MAX: 1.05,
@@ -80,9 +80,9 @@ const CONFIG = {
   MERGE_GROWTH_CAP: 0.8, // 合体しても大きくなりすぎない上限
 
   // 拭った場所に溜まる水滴(指でなぞった跡から垂れ落ちる)
-  DRIP_SPAWN_THRESHOLD: 0.03, // これだけの「拭った面積」が溜まるたびに1滴生まれる
+  DRIP_SPAWN_THRESHOLD: 0.025, // これだけの「拭った面積」が溜まるたびに1滴生まれる
   DRIP_INITIAL_R: 0.015,
-  DRIP_INITIAL_MOMENTUM: 0.2, // 初速
+  DRIP_INITIAL_MOMENTUM: 0.4, // 初速
   DRIP_WIPE_AMOUNT: 1.0, // 結露を拭う強度
   DRIP_WIPE_RADIUS_FACTOR: 1 / 2, // 拭う範囲は見た目のインスタンスサイズのこの倍率まで絞る
 };
@@ -755,7 +755,7 @@ function updateDrops(dt) {
     }
 
     // 摩擦を弱め、一度動き出したら画面を最後まで滑り落ちていく余韻を持たせる
-    d.momentum -= Math.max(0.9, d.momentum * 0.6) * dt;
+    d.momentum -= Math.max(0.5, d.momentum * 0.6) * dt;
     if (d.momentum < 0) d.momentum = 0;
     d.momentumX *= Math.pow(0.6, dt * 60);
   }
