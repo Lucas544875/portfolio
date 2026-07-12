@@ -682,6 +682,16 @@ function updateMistDrops(dt) {
 
 let rainSpawnAccumulator = 0;
 
+// 合体時、生き残る側(survivor)の位置を、吸収する側(absorbed)との
+// 重さ(半径^2 = 面積で近似)の加重平均の位置までそのまま寄せる。
+// 速度(momentumX)ではなくその場の変位として与えるので、dtやフレームレートの
+// ブレに影響されず、常に同じ分だけ位置がずれる。
+function applyMergeSidewaysDrift(survivor, absorbed) {
+  const wSurvivor = survivor.r * survivor.r;
+  const wAbsorbed = absorbed.r * absorbed.r;
+  survivor.x = (wSurvivor * survivor.x + wAbsorbed * absorbed.x) / (wSurvivor + wAbsorbed);
+}
+
 function updateDrops(dt) {
   rainSpawnAccumulator += dt * CONFIG.RAIN_SPAWN_PER_SEC;
   while (rainSpawnAccumulator >= 1) {
@@ -793,7 +803,8 @@ function updateDrops(dt) {
               const big = a.r >= b.r ? a : b;
               const small = a.r >= b.r ? b : a;
               big.r = Math.min(CONFIG.DROP_MAX_R * CONFIG.MERGE_GROWTH_CAP, Math.sqrt(big.r * big.r + small.r * small.r * 0.8));
-              big.momentum = Math.max(big.momentum, small.momentum, Math.min(0.6, big.momentum + 0.05));
+              big.momentum = Math.max(big.momentum, small.momentum, big.momentum + 0.05);
+              applyMergeSidewaysDrift(big, small);
               small.killed = true;
             }
           }
@@ -843,6 +854,7 @@ function updateDrops(dt) {
             if (dx * dx + dy * dy < rSum * rSum) {
               a.r = Math.min(CONFIG.DROP_MAX_R * CONFIG.MERGE_GROWTH_CAP, Math.sqrt(a.r * a.r + m.r * m.r * 0.8));
               a.momentum = Math.max(a.momentum, Math.min(0.6, a.momentum + 0.05));
+              applyMergeSidewaysDrift(a, m);
               consumedMist.add(m);
               respawnMistDrop(m);
             }
