@@ -153,6 +153,11 @@ export class SharedGLRenderer {
 
       gl.viewport(x, y, w, h);
       gl.scissor(x, y, w, h);
+      // VAOバインドはブロックをまたいで残り得るステートなので、各ブロックの
+      // render()に入る前に必ずデフォルト(null)へ戻しておく。VAOを使うブロックは
+      // 自分でbindVertexArrayするので問題なく、VAOを使わないブロック(生の
+      // vertexAttribPointerのみ)が前のブロックのVAOを誤って書き換えるのを防ぐ。
+      gl.bindVertexArray(null);
       block.render(gl, {
         time: this._time,
         dt,
