@@ -72,7 +72,7 @@ const CONFIG = {
 
   // drops: 重力で落ちる大粒の雨。物理演算(加速・軌跡・合体)はこちらだけが持つ。
   DROP_MAX_COUNT: 10000, // mistが土台の密度を担うので、こちらは動きのある粒だけで十分
-  RAIN_SPAWN_PER_SEC: 10, // DROP_MAX_COUNTに達したらこれ以上増えても見た目は変わらない
+  RAIN_SPAWN_PER_SEC: 30, // DROP_MAX_COUNTに達したらこれ以上増えても見た目は変わらない
   RAIN_SPAWN_Y_MIN: 0.05, // 雨粒は上端から流れてくるのではなく、画面全体にランダムに着弾する
   RAIN_SPAWN_Y_MAX: 1.05,
   TRAIL_RATE: 2.0, // 落下中に軌跡の滴を残す頻度
@@ -755,7 +755,7 @@ function updateDrops(dt) {
     }
 
     // 摩擦を弱め、一度動き出したら画面を最後まで滑り落ちていく余韻を持たせる
-    d.momentum -= Math.max(0.1, d.momentum * 0.6) * dt;
+    d.momentum -= Math.max(0.9, d.momentum * 0.6) * dt;
     if (d.momentum < 0) d.momentum = 0;
     d.momentumX *= Math.pow(0.6, dt * 60);
   }
