@@ -57,7 +57,7 @@ const CONFIG = {
 
   // 「静的な小粒の結露(mist)」と「物理演算で落ちる大粒の雨(drops)」を完全に別のシステムとして持つ。
   WATER_RESOLUTION: 1000,
-  DROP_MIN_R: 0.0055, // UV空間(画面高さ基準)での最小半径
+  DROP_MIN_R: 0.0045, // UV空間(画面高さ基準)での最小半径
   DROP_MAX_R: 0.02, // まれに大粒の「涙」のような雫が生まれるよう少し大きめに
   REFRACTION_STRENGTH: 0.045, // 水滴一つ一つがより強くレンズのように景色を歪める
   METABALL_THRESHOLD: 0.5, // これを超えたfieldの場所が水滴の内側になる(低いほど繋がりやすい)
@@ -68,16 +68,16 @@ const CONFIG = {
 
   // mist: 常時画面を覆う、動かない小粒の結露。固定数・配列の出し入れ無しで
   // 蒸発したその場に生まれ変わるだけなので、数が多くても軽い。
-  MIST_COUNT: 5000,
+  MIST_COUNT: 3000,
 
   // drops: 重力で落ちる大粒の雨。物理演算(加速・軌跡・合体)はこちらだけが持つ。
-  DROP_MAX_COUNT: 500, // mistが土台の密度を担うので、こちらは動きのある粒だけで十分
-  RAIN_SPAWN_PER_SEC: 40, // DROP_MAX_COUNTに達したらこれ以上増えても見た目は変わらない
+  DROP_MAX_COUNT: 10000, // mistが土台の密度を担うので、こちらは動きのある粒だけで十分
+  RAIN_SPAWN_PER_SEC: 10, // DROP_MAX_COUNTに達したらこれ以上増えても見た目は変わらない
   RAIN_SPAWN_Y_MIN: 0.05, // 雨粒は上端から流れてくるのではなく、画面全体にランダムに着弾する
   RAIN_SPAWN_Y_MAX: 1.05,
   TRAIL_RATE: 2.0, // 落下中に軌跡の滴を残す頻度
-  MERGE_DISTANCE_FACTOR: 0.55, // 合体しにくくして小粒のままでいる水滴を主体にする
-  MERGE_GROWTH_CAP: 10, // 合体しても大きくなりすぎない上限
+  MERGE_DISTANCE_FACTOR: 0.33, // 合体しにくくして小粒のままでいる水滴を主体にする
+  MERGE_GROWTH_CAP: 0.8, // 合体しても大きくなりすぎない上限
 
   // 拭った場所に溜まる水滴(指でなぞった跡から垂れ落ちる)
   DRIP_SPAWN_THRESHOLD: 0.03, // これだけの「拭った面積」が溜まるたびに1滴生まれる
@@ -640,14 +640,20 @@ function spawnDrop({ x, y, r, momentum = 0, momentumX = 0, parentId = null, isDr
 // ----------------------------------------------------------------------------
 const mistDrops = [];
 
+// 蒸発しきった時・dropsに吸収された時のどちらでも、配列の出し入れはせず
+// 同じスロットで別の場所に生まれ変わらせるための共通処理。
+function respawnMistDrop(d) {
+  d.x = Math.random();
+  d.y = Math.random();
+  d.r = randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2.2);
+  d.shrink = 0;
+  d.shrinking = false;
+}
+
 function makeMistDrop() {
-  return {
-    x: Math.random(),
-    y: Math.random(),
-    r: randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2.2),
-    shrink: 0,
-    shrinking: false,
-  };
+  const d = { x: 0, y: 0, r: 0, shrink: 0, shrinking: false };
+  respawnMistDrop(d);
+  return d;
 }
 
 function seedMistDrops() {
@@ -669,12 +675,7 @@ function updateMistDrops(dt) {
     }
     d.r -= d.shrink * dt;
     if (d.r <= CONFIG.DROP_MIN_R * 0.25) {
-      // 蒸発しきったら、配列の出し入れはせず同じスロットで別の場所に生まれ変わる
-      d.x = Math.random();
-      d.y = Math.random();
-      d.r = randomRange(CONFIG.DROP_MIN_R, CONFIG.DROP_MIN_R * 2.2);
-      d.shrink = 0;
-      d.shrinking = false;
+      respawnMistDrop(d);
     }
   }
 }
@@ -751,7 +752,15 @@ function updateDrops(dt) {
 
   // 近くの水滴との合体判定
   {
-    const cellSize = CONFIG.MERGE_DISTANCE_FACTOR * CONFIG.DROP_MAX_R * 2.2;
+    // セルサイズは合体判定距離(rSum)以上でなければ、3x3近傍探索が
+    // 実際には範囲内にいる水滴を取りこぼしてしまう。水滴は合体を重ねる
+    // ことでDROP_MAX_Rを大きく超えて成長しうる(最大 DROP_MAX_R * MERGE_GROWTH_CAP)ため、
+    // 固定値のDROP_MAX_Rではなく、現時点で存在する水滴の最大半径から動的に求める。
+    let maxR = CONFIG.DROP_MAX_R;
+    for (const d of drops) {
+      if (!d.killed && d.r > maxR) maxR = d.r;
+    }
+    const cellSize = CONFIG.MERGE_DISTANCE_FACTOR * maxR * 2.2;
     const grid = new Map();
     for (const d of drops) {
       if (d.killed) continue;
@@ -786,6 +795,56 @@ function updateDrops(dt) {
               big.r = Math.min(CONFIG.DROP_MAX_R * CONFIG.MERGE_GROWTH_CAP, Math.sqrt(big.r * big.r + small.r * small.r * 0.8));
               big.momentum = Math.max(big.momentum, small.momentum, Math.min(0.6, big.momentum + 0.05));
               small.killed = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // dropsが近づいた時のmist(結露)の受動的な吸収判定。
+  // 対象は外の雨によるdrops(isDrip=false)のみ — 拭った跡から垂れる水滴
+  // (isDrip=true)は結露(mist)とは無関係な独立したシステムとして扱うため、
+  // ここでは一切mistを探しに行かない。
+  // mist側からは一切近寄っていかず、対象のdropsだけが探しに行く。大小に関わらず
+  // 生き残るのは常にdrops側で、mist側は蒸発しきった時と同じ要領で
+  // 別の場所に生まれ変わる(配列の出し入れはしない)。
+  {
+    let maxDropR = CONFIG.DROP_MAX_R;
+    for (const d of drops) {
+      if (!d.killed && !d.isDrip && d.r > maxDropR) maxDropR = d.r;
+    }
+    const cellSize = CONFIG.MERGE_DISTANCE_FACTOR * maxDropR * 2.2;
+    const mistGrid = new Map();
+    for (const m of mistDrops) {
+      const key = `${Math.floor(m.x / cellSize)},${Math.floor(m.y / cellSize)}`;
+      let bucket = mistGrid.get(key);
+      if (!bucket) {
+        bucket = [];
+        mistGrid.set(key, bucket);
+      }
+      bucket.push(m);
+    }
+
+    const consumedMist = new Set();
+    for (const a of drops) {
+      if (a.killed || a.isDrip) continue;
+      const cx = Math.floor(a.x / cellSize);
+      const cy = Math.floor(a.y / cellSize);
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const bucket = mistGrid.get(`${cx + ox},${cy + oy}`);
+          if (!bucket) continue;
+          for (const m of bucket) {
+            if (consumedMist.has(m)) continue;
+            const dx = a.x - m.x;
+            const dy = a.y - m.y;
+            const rSum = (a.r + m.r) * CONFIG.MERGE_DISTANCE_FACTOR;
+            if (dx * dx + dy * dy < rSum * rSum) {
+              a.r = Math.min(CONFIG.DROP_MAX_R * CONFIG.MERGE_GROWTH_CAP, Math.sqrt(a.r * a.r + m.r * m.r * 0.8));
+              a.momentum = Math.max(a.momentum, Math.min(0.6, a.momentum + 0.05));
+              consumedMist.add(m);
+              respawnMistDrop(m);
             }
           }
         }
