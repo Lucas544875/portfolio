@@ -1,0 +1,55 @@
+/* 作品詳細サブページ(works/*)共通のレイアウト。メインのstyle.cssを前提にした追加分。 */
+
+.back-link {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 4;
+  color: #bfefff;
+  font-size: .85rem;
+  letter-spacing: .05em;
+  text-decoration: none;
+  background: rgba(3, 16, 20, .45);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(191, 239, 255, .18);
+  border-radius: 999px;
+  padding: .5rem 1rem;
+}
+.back-link:hover { border-color: rgba(191, 239, 255, .4); }
+
+.work-detail {
+  position: relative;
+  z-index: 1;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+  line-height: 1.8;
+}
+.work-detail h1 {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  margin: 0 0 1rem;
+}
+.work-detail .lead {
+  font-size: 1rem;
+  opacity: .85;
+  margin-bottom: 2.5rem;
+}
+.work-detail h2 {
+  font-size: 1.1rem;
+  margin: 2.5rem 0 1rem;
+  color: #bfefff;
+}
+.work-detail ul {
+  padding-left: 1.2rem;
+  margin: 0;
+}
+.work-detail li {
+  margin-bottom: .9rem;
+  opacity: .9;
+}
+.work-detail code {
+  background: rgba(191, 239, 255, .1);
+  padding: .1em .4em;
+  border-radius: .25em;
+  font-size: .9em;
+}
