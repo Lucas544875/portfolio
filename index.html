@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>プロトタイプ一覧</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d12;
+    --card: #14171f;
+    --card-border: #262b38;
+    --fg: #e6e9f0;
+    --fg-dim: #9aa3b5;
+    --accent: #7fd0ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 3rem 1.5rem 5rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    line-height: 1.7;
+  }
+  header {
+    max-width: 880px;
+    margin: 0 auto 2.5rem;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin: 0 0 0.5rem;
+  }
+  header p {
+    color: var(--fg-dim);
+    margin: 0;
+    font-size: 0.95rem;
+  }
+  h2 {
+    max-width: 880px;
+    margin: 2.5rem auto 1rem;
+    font-size: 1.05rem;
+    color: var(--fg-dim);
+    font-weight: 500;
+    border-bottom: 1px solid var(--card-border);
+    padding-bottom: 0.5rem;
+  }
+  .grid {
+    max-width: 880px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+  a.card {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    padding: 1.1rem 1.2rem;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  a.card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .card .name {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-bottom: 0.35rem;
+  }
+  .card .title {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+  }
+  .card .desc {
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+  }
+  footer {
+    max-width: 880px;
+    margin: 3rem auto 0;
+    color: var(--fg-dim);
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>portfolio — プロトタイプ一覧</h1>
+    <p>
+      フレームワーク無し・ビルド不要の単体WebGL2プロトタイプ集。
+      各カードをクリックすると該当プロトタイプが開く(このページ自体をリポジトリ直下で
+      <code>python3 -m http.server</code> して開けば、相対パスのままそのまま遷移できる)。
+      各プロトタイプの詳細・設計意図・チューニングメモは同フォルダの <code>README.md</code> を参照。
+    </p>
+  </header>
+
+  <h2>錯視・レイマーチ系(2026-07-13 追加)</h2>
+  <div class="grid">
+    <a class="card" href="prototype-impossible/">
+      <div class="name">prototype-impossible/</div>
+      <div class="title">不可能な結晶</div>
+      <div class="desc">
+        depth-swapトリックで、視点を固定した時だけ1本に繋がって見え、動かすと2つの断片に割れる。
+      </div>
+    </a>
+    <a class="card" href="prototype-anamorphic/">
+      <div class="name">prototype-anamorphic/</div>
+      <div class="title">アナモルフィックな漢字</div>
+      <div class="desc">
+        散らばったガラス破片が、スイートスポットからだけ漢字「水」のシルエットに整列する。
+      </div>
+    </a>
+    <a class="card" href="prototype-forced-perspective/">
+      <div class="name">prototype-forced-perspective/</div>
+      <div class="title">強制遠近法</div>
+      <div class="desc">
+        r/d比を揃えた大小4つの球が同じ見かけサイズに並び、視点が動くと真のサイズ差が露呈する。
+      </div>
+    </a>
+    <a class="card" href="prototype-portal/">
+      <div class="name">prototype-portal/</div>
+      <div class="title">非ユークリッドの窓(ポータル)</div>
+      <div class="desc">
+        ガラス窓をレイが越えると、別の座標系・別の部屋(暖色・3倍スケール)に繋がる継ぎ目トリック。
+      </div>
+    </a>
+    <a class="card" href="prototype-infinite-corridor/">
+      <div class="name">prototype-infinite-corridor/</div>
+      <div class="title">無限に沈む回廊</div>
+      <div class="desc">
+        ドメインリピティションで窓枠が無限に後退する回廊。潜るほど霧が濃く・暗く・歪む。
+      </div>
+    </a>
+    <a class="card" href="prototype-metaball-text/">
+      <div class="name">prototype-metaball-text/</div>
+      <div class="title">メタボール文字</div>
+      <div class="desc">
+        ガラスの水滴がsmooth-minで液体的に融合しながら、正しい筆順で「川」の字を形成する。
+      </div>
+    </a>
+  </div>
+
+  <h2>ガラス・水系(初期プロトタイプ)</h2>
+  <div class="grid">
+    <a class="card" href="prototype/">
+      <div class="name">prototype/</div>
+      <div class="title">結露したガラスの向こう側</div>
+      <div class="desc">
+        KanjiVGの筆順データで、指でなぞった軌跡だけ結露が拭われるヒーロー演出。
+      </div>
+    </a>
+    <a class="card" href="prototype-rain-window/">
+      <div class="name">prototype-rain-window/</div>
+      <div class="title">雨の中の窓</div>
+      <div class="desc">
+        雨粒が伝い落ちるガラス窓越しに、奥の景色がぼんやり歪んで見えるシェーダー。
+      </div>
+    </a>
+    <a class="card" href="prototype-shards/">
+      <div class="name">prototype-shards/</div>
+      <div class="title">ガラスの破片</div>
+      <div class="desc">
+        物理的に一貫した屈折率・分散から色収差を導出した、たくさん浮かぶ結晶ガラス片。
+      </div>
+    </a>
+  </div>
+
+  <footer>
+    各プロトタイプは完全に独立したWebGL2アプリ(ビルド不要)。動作確認はリポジトリ直下または
+    各フォルダ内で <code>python3 -m http.server</code> を実行してブラウザで開く。
+  </footer>
+</body>
+</html>
