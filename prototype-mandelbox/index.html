@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>マンデルボックスのレイマーチ</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <div id="fadeOverlay"></div>
+
+  <div id="label" class="label">MANDELBOX — RAYMARCHED IFS FRACTAL</div>
+
+  <div id="hint" class="hint">
+    ドラッグで視点を微調整・ホイールでズーム速度を調整。時間が経つと自動で同じ場所へ潜っていきます。
+  </div>
+
+  <div id="zoomPanel" class="zoom-panel">
+    <div class="zoom-row">
+      <span class="zoom-label">ZOOM</span>
+      <span id="zoomReadout" class="zoom-value">10^0.00×</span>
+    </div>
+    <div class="zoom-bar-track"><div id="zoomBarFill" class="zoom-bar-fill"></div></div>
+    <div id="zoomPhase" class="zoom-phase">全体像を確認中…</div>
+  </div>
+
+  <div id="fallback" class="fallback hidden">
+    <p>このブラウザは WebGL2 に対応していません。<br/>最新の Chrome / Edge / Firefox でお試しください。</p>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
