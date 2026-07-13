@@ -74,6 +74,43 @@ html, body {
   opacity: 0;
 }
 
+.curvature-panel {
+  position: fixed;
+  right: 1.4rem;
+  bottom: 1.6rem;
+  width: min(300px, 40vw);
+  padding: 0.9rem 1.1rem 1rem;
+  background: rgba(10, 13, 22, 0.72);
+  border: 1px solid rgba(230, 236, 245, 0.16);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  color: rgba(220, 228, 240, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  z-index: 10;
+}
+
+.curvature-panel label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgba(220, 228, 240, 0.55);
+  margin-bottom: 0.5rem;
+}
+
+.curvature-panel input[type="range"] {
+  width: 100%;
+  accent-color: #7fd0ff;
+  cursor: pointer;
+  touch-action: auto;
+}
+
+.curvature-readout {
+  margin-top: 0.5rem;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
 .fallback {
   position: fixed;
   inset: 0;
