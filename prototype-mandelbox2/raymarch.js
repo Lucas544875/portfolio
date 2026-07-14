@@ -1,5 +1,5 @@
 // global
-let c, cw, ch, gl, fadeOverlay, hint, zoomReadout, zoomBarFill, zoomPhaseEl;
+let c, cw, ch, gl, fadeOverlay, hint, zoomReadout, zoomBarFill, zoomPhaseEl, pauseBtn;
 let mouseflag=false;
 let centorx;
 let centory;
@@ -239,6 +239,10 @@ let dragQuat = new Quatarnion(1, 0, 0, 0); // ドラッグによる見回し(累
 // (マウス座標の差分だけでは「今どちらを向いているか」がわからないため)。
 let lastCamR = [1, 0, 0], lastCamU = [0, 0, 1];
 let speedMult = 1.0;
+// 一時停止中はupdateCycle()を呼ばないことでcycleT/phase/autoYaw等を完全に
+// 凍結する(ドラッグでの見回しはそのまま効く)。lastTimeはframe()の先頭で
+// 毎フレーム更新し続けるため、再開時に大きなdtが一気に流れ込むことはない。
+let paused = false;
 
 function currentDist(t) {
   if (t <= ORBIT_DURATION) return OVERVIEW_DIST;
@@ -292,6 +296,7 @@ window.onload = function(){
   zoomReadout = document.getElementById('zoomReadout');
   zoomBarFill = document.getElementById('zoomBarFill');
   zoomPhaseEl = document.getElementById('zoomPhase');
+  pauseBtn = document.getElementById('pauseBtn');
 
   // WebGL コンテキストを取得
   gl = c.getContext('webgl');
@@ -305,6 +310,8 @@ window.onload = function(){
   document.addEventListener("mouseup",mouseUp,true);
   c.addEventListener('mousemove', mouseMove, true);
   c.addEventListener('wheel', onWheel, { passive: false });
+  pauseBtn.addEventListener('click', togglePause);
+  document.addEventListener('keydown', onKeyDown);
 
   // シェーダのコンパイル
   let prg = create_program(create_shader('vs'), create_shader('fs'));
@@ -359,7 +366,7 @@ function frame(now){
   const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
 
-  updateCycle(dt);
+  if (!paused) updateCycle(dt);
   const dist = currentDist(cycleT);
   // 自動首振り(基準の上方向まわりの一定回転)とドラッグ(クォータニオンで
   // 累積・制限なし)を合成する。
@@ -515,10 +522,11 @@ function updateHUD(dist) {
   const zoomExp = Math.log10(Math.max(zoomFactor, 1));
   zoomReadout.textContent = `10^${zoomExp.toFixed(2)}×`;
   zoomBarFill.style.width = `${zoomProgress(dist) * 100}%`;
-  zoomPhaseEl.textContent =
+  const phaseLabel =
     phase === "overview" ? "全体像を確認中…" :
     phase === "fade" ? "次のポイントへ移動中…" :
     "同じ地点へズームイン中…";
+  zoomPhaseEl.textContent = paused ? `${phaseLabel}(一時停止中)` : phaseLabel;
 }
 
 // 初回操作でヒントをフェードアウトさせる。
@@ -528,6 +536,22 @@ function engage() {
     userEngaged = true;
     hint.classList.add('faded');
   }
+}
+
+// 一時停止(クリック・スペースキー共通)。frame()側でupdateCycle()の呼び出し
+// 自体をスキップするだけなので、ドラッグでの見回しは一時停止中も効く。
+function togglePause() {
+  paused = !paused;
+  pauseBtn.textContent = paused ? "▶" : "⏸";
+  pauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
+  pauseBtn.setAttribute("aria-label", paused ? "再生(スペースキー)" : "一時停止(スペースキー)");
+  engage();
+}
+
+function onKeyDown(e) {
+  if (e.code !== "Space" && e.key !== " ") return;
+  e.preventDefault(); // スペースキーの既定動作(スクロール)を止める
+  togglePause();
 }
 
 //マウスインターフェース
