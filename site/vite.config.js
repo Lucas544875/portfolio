@@ -11,6 +11,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+        worksList: resolve(__dirname, 'works/index.html'),
         rainWindow: resolve(__dirname, 'works/rain-window/index.html'),
       },
     },

@@ -1,0 +1,148 @@
+/* 作品カバーフロー。Works一覧サブページ(works/index.html)とメインページの
+   works-bブロックの両方から使う共通コンポーネント。メインのstyle.cssを
+   前提にした追加分。 */
+
+.works-list-page {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6rem 1.25rem 4rem;
+}
+
+/* メインページのブロック内に埋め込む場合はページ自体の高さを持たせない
+   (親の.block-slotが既にmin-height:100vhを持つため二重にしない)。 */
+.works-embed {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1.25rem;
+}
+
+/* works-bブロック全体を/works/へのリンクにする場合の見た目調整
+   (aタグ自体をflexコンテナ化しているのでリセットが必要)。 */
+.works-embed-link {
+  text-decoration: none;
+  color: inherit;
+  transition: opacity .25s ease;
+}
+.works-embed-link:hover,
+.works-embed-link:focus-visible {
+  opacity: .85;
+}
+
+.works-list-title {
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  letter-spacing: .08em;
+  margin: 0 0 3rem;
+  background: linear-gradient(120deg, #eafcff 0%, #bfefff 35%, #8fd7ff 65%, #c9b8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.cf {
+  width: 100%;
+  max-width: 60rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* カバーフロー本体。奥行きはCSS 3D transformのみで表現し、WebGLは使わない
+   (サムネイルは静止画のため、共有レンダラのcontext予算を消費するメリットがない)。 */
+.cf-stage {
+  position: relative;
+  width: 100%;
+  height: min(46vh, 320px);
+  perspective: 1200px;
+}
+
+.cf-track {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform-style: preserve-3d;
+}
+
+.cf-item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  cursor: pointer;
+  transition: transform .5s cubic-bezier(.22, .61, .36, 1), opacity .5s ease;
+  will-change: transform;
+}
+
+.cf-thumb {
+  width: 100%;
+  height: 100%;
+  border-radius: .5rem;
+  border: 1px solid rgba(191, 239, 255, .18);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, .45);
+}
+
+/* ダミーサムネイル。実画像が用意でき次第、対応するcf-thumbに
+   background-image を設定する形に置き換える。 */
+.cf-thumb-1 { background: linear-gradient(160deg, #1c4a55, #4fb3c7 60%, #bfefff); }
+.cf-thumb-2 { background: linear-gradient(160deg, #2a1c55, #7a4fc7 60%, #d8bfff); }
+.cf-thumb-3 { background: linear-gradient(160deg, #1c3a55, #4f8ac7 60%, #bfd7ff); }
+.cf-thumb-4 { background: linear-gradient(160deg, #55231c, #c7734f 60%, #ffd6bf); }
+
+.cf-caption {
+  margin-top: 2.5rem;
+  text-align: center;
+  max-width: 32rem;
+  min-height: 8rem;
+}
+.cf-caption-title {
+  margin: 0 0 .6rem;
+  font-size: 1.2rem;
+  letter-spacing: .05em;
+}
+.cf-caption-desc {
+  margin: 0 0 1rem;
+  font-size: .9rem;
+  line-height: 1.7;
+  opacity: .85;
+}
+.cf-caption-link {
+  display: inline-block;
+  font-size: .85rem;
+  letter-spacing: .05em;
+  color: #bfefff;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(191, 239, 255, .35);
+}
+.cf-caption-link:hover { border-color: rgba(191, 239, 255, .8); }
+
+.cf-controls {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.cf-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(191, 239, 255, .18);
+  background: rgba(3, 16, 20, .45);
+  backdrop-filter: blur(6px);
+  color: #eafcff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .2s ease, transform .15s ease;
+}
+.cf-btn:hover { border-color: rgba(191, 239, 255, .5); transform: scale(1.06); }

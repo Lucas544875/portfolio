@@ -5,9 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>髙柳海斗 / jack</title>
 <link rel="stylesheet" href="/src/style.css" />
+<link rel="stylesheet" href="/src/components/cover-flow.css" />
 </head>
 <body>
 <canvas id="gl-canvas"></canvas>
+
+<nav class="site-nav">
+  <a href="/works/">Works</a>
+  <a href="#about">About</a>
+  <a href="https://github.com/Lucas544875" target="_blank" rel="noreferrer">GitHub</a>
+</nav>
 
 <main>
   <section class="block-slot" id="hero">
@@ -32,11 +39,28 @@
     </div>
   </section>
 
-  <section class="block-slot placeholder-block" id="works-b">
-    <div class="section-inner">
-      <h2>Works（プレースホルダ B）</h2>
-      <p>ここに実作品（例: Hausdorff次元）を差し込む。</p>
-    </div>
+  <section class="block-slot" id="works-b">
+    <!--
+      このブロック全体が/works/(Works一覧サブページ)へのリンク。
+      カバーフローは自動でスライドする見た目のみで、個々の作品への
+      リンクは持たない(選ぶ操作は/works/側で行う)。
+      サムネイルはダミー(CSSグラデーション)。実画像が用意でき次第 cf-thumb に
+      background-image を差し込む形に置き換える。
+    -->
+    <a class="works-embed works-embed-link" href="/works/" aria-label="Works一覧を見る">
+      <h2 class="works-list-title">Works</h2>
+
+      <div class="cf" aria-hidden="true">
+        <div class="cf-stage">
+          <ul class="cf-track">
+            <li class="cf-item"><div class="cf-thumb cf-thumb-1"></div></li>
+            <li class="cf-item"><div class="cf-thumb cf-thumb-2"></div></li>
+            <li class="cf-item"><div class="cf-thumb cf-thumb-3"></div></li>
+            <li class="cf-item"><div class="cf-thumb cf-thumb-4"></div></li>
+          </ul>
+        </div>
+      </div>
+    </a>
   </section>
 
   <footer>
