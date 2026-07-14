@@ -512,9 +512,9 @@ function updateHUD(dist) {
   zoomReadout.textContent = `10^${zoomExp.toFixed(2)}×`;
   zoomBarFill.style.width = `${zoomProgress(dist) * 100}%`;
   const phaseLabel =
-    phase === "overview" ? "全体像を確認中…" :
+    phase === "overview" ? "待機中…" :
     phase === "fade" ? "次のポイントへ移動中…" :
-    "同じ地点へズームイン中…";
+    "ズームイン中…";
   zoomPhaseEl.textContent = paused ? `${phaseLabel}(一時停止中)` : phaseLabel;
 }
 
