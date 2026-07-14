@@ -52,19 +52,42 @@ export function initCoverFlow(root) {
 
   // ドラッグ/スワイプでの送り操作(マウス・タッチ共通)
   let dragStartX = null;
+  let dragStartTarget = null;
   stage.addEventListener('pointerdown', (e) => {
     dragStartX = e.clientX;
+    dragStartTarget = e.target;
   });
   stage.addEventListener('pointerup', (e) => {
     if (dragStartX === null) return;
     const delta = e.clientX - dragStartX;
+    const startedOnItem = dragStartTarget && dragStartTarget.closest('.cf-item');
     dragStartX = null;
-    if (delta > DRAG_THRESHOLD) goTo(current - 1);
-    else if (delta < -DRAG_THRESHOLD) goTo(current + 1);
+    dragStartTarget = null;
+
+    if (delta > DRAG_THRESHOLD) { goTo(current - 1); return; }
+    if (delta < -DRAG_THRESHOLD) { goTo(current + 1); return; }
+    if (startedOnItem) return; // アイテム自体のクリックは各itemのclickハンドラに任せる
+
+    // 束になった左右の余白(アイテムの隙間)をクリックした場合もその側へ1つ送る
+    const rect = stage.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    goTo(clickX < rect.width / 2 ? current - 1 : current + 1);
   });
   stage.addEventListener('pointerleave', () => {
     dragStartX = null;
+    dragStartTarget = null;
   });
+
+  // マウスホイール/トラックパッドのスクロールでの送り操作
+  let wheelLocked = false;
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    if (wheelLocked || Math.abs(delta) < 4) return;
+    wheelLocked = true;
+    goTo(current + (delta > 0 ? 1 : -1));
+    setTimeout(() => { wheelLocked = false; }, 400);
+  }, { passive: false });
 
   layout();
 }
