@@ -91,14 +91,10 @@
   border-radius: .5rem;
   border: 1px solid rgba(191, 239, 255, .18);
   box-shadow: 0 20px 40px rgba(0, 0, 0, .45);
+  background-color: #1c3a55;
+  background-size: cover;
+  background-position: top center;
 }
-
-/* ダミーサムネイル。実画像が用意でき次第、対応するcf-thumbに
-   background-image を設定する形に置き換える。 */
-.cf-thumb-1 { background: linear-gradient(160deg, #1c4a55, #4fb3c7 60%, #bfefff); }
-.cf-thumb-2 { background: linear-gradient(160deg, #2a1c55, #7a4fc7 60%, #d8bfff); }
-.cf-thumb-3 { background: linear-gradient(160deg, #1c3a55, #4f8ac7 60%, #bfd7ff); }
-.cf-thumb-4 { background: linear-gradient(160deg, #55231c, #c7734f 60%, #ffd6bf); }
 
 .cf-caption {
   margin-top: 2.5rem;
