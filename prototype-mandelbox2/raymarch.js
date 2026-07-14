@@ -77,6 +77,11 @@ function vcross(a, b) {
 function vadd(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
 function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 function vscale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+function vdot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+// mandelbox.fragのLightDirと同じ(=光源のある方向)。平行光線そのものの
+// 進行方向はこの逆(-LIGHT_DIR)になる。
+const LIGHT_DIR = vnormalize([2, 1, 1]);
 
 // JSの倍精度(number)を、GPUへdf64として渡すためのfloat32ペア(hi,lo)に
 // 分割する(prototype-mandelboxのmain.jsと同じ手法)。
@@ -132,11 +137,15 @@ const FALLBACK_TARGET = {
 // ほぼ原点方向(+わずかなジッター)へレイを飛ばして命中点を採用する。
 function pickTarget() {
   const probeR = BOUND_RADIUS * 2.4;
-  for (let attempt = 0; attempt < 24; attempt++) {
+  for (let attempt = 0; attempt < 48; attempt++) {
     const dir0 = randomUnitVector();
     const probeOrigin = vscale(dir0, probeR);
     const jitter = randomUnitVector();
     const aim = vnormalize(vadd(vscale(dir0, -1), vscale(jitter, 0.18)));
+    // 逆光(視線が光源のある方向を向く)になる候補は避ける。平行光線の
+    // 進行方向(-LIGHT_DIR)と視線(aim)の内積が正、つまり視線が光源方向
+    // (LIGHT_DIR)を向いていない(dot(LIGHT_DIR, aim) < 0)場合のみ残す。
+    if (vdot(LIGHT_DIR, aim) >= 0) continue;
     const res = jsRaymarch(probeOrigin, aim, probeR * 2.5);
     if (!res.hit) continue;
     const distFromOrigin = Math.hypot(res.p[0], res.p[1], res.p[2]);
