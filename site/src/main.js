@@ -1,6 +1,7 @@
 import './style.css';
 import { SharedGLRenderer } from './gl/renderer.js';
 import { createHeroBlock } from './blocks/hero/index.js';
+import { createMandelboxBlock } from './blocks/mandelbox/index.js';
 import { createRainWindowBlock } from './blocks/rain-window/index.js';
 import { initCoverFlowAuto } from './components/cover-flow-auto.js';
 
@@ -11,6 +12,7 @@ initCoverFlowAuto(document.getElementById('works-b'));
 
 if (renderer.supported) {
   renderer.register(createHeroBlock(document.getElementById('hero')));
+  renderer.register(createMandelboxBlock(document.getElementById('about')));
   renderer.register(createRainWindowBlock(document.getElementById('works-a')));
 
   renderer.start();
