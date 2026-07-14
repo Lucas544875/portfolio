@@ -1,18 +1,28 @@
 // global
-let c, cw, ch, gl, eCheck, fadeOverlay;
+let c, cw, ch, gl, fadeOverlay, hint, zoomReadout, zoomBarFill, zoomPhaseEl;
 let mouseflag=false;
 let centorx;
 let centory;
-let startTime;
-let tempTime =0;
-let timenow = new Date().getTime();
 let uniLocation = [];
 let vAttLocation = [];
 let attStride = [];
-let run = true;
 let cDir;
 let cPos;
-let recorder;
+
+// 全画面表示。タッチ端末では描画負荷を抑えるためレンダースケール・DPR上限を
+// 落とす(main.jsのプロトタイプと同じ方針)。
+const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
+const RENDER_SCALE = isCoarsePointer ? 0.55 : 0.85;
+const DPR_CAP = isCoarsePointer ? 1.5 : 2.0;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+  cw = Math.max(2, Math.floor(window.innerWidth * dpr * RENDER_SCALE));
+  ch = Math.max(1, Math.floor(window.innerHeight * dpr * RENDER_SCALE));
+  c.width = cw;
+  c.height = ch;
+  if (gl) gl.viewport(0, 0, cw, ch);
+}
 
 // ----------------------------------------------------------------------------
 // マンデルボックスのDE(mandelbox.fragのmandelBox()と全く同じ式)。
@@ -238,53 +248,24 @@ function updateCycle(dt) {
 window.onload = function(){
   // エレメントを取得
   c = document.getElementById('canvas');
-  eCheck = document.getElementById('check');
   fadeOverlay = document.getElementById('fadeOverlay');
+  hint = document.getElementById('hint');
+  zoomReadout = document.getElementById('zoomReadout');
+  zoomBarFill = document.getElementById('zoomBarFill');
+  zoomPhaseEl = document.getElementById('zoomPhase');
 
-  // キャンバスサイズの設定
-  ch=645;cw=860;
-  c.height=ch;
-  c.width=cw;
+  // WebGL コンテキストを取得
+  gl = c.getContext('webgl');
 
-  //録画の設定
-  let rstart = document.getElementById('recStart');
-  let rstop = document.getElementById('recStop');
-  let stream = canvas.captureStream();
-  recorder = new MediaRecorder(stream, {mimeType:'video/webm;codecs=vp9'});
-  var anchor = document.getElementById('downloadlink');
-	//録画終了時に動画ファイルのダウンロードリンクを生成
-	recorder.ondataavailable = function(e) {
-    console.log("data-available");
-		var videoBlob = new Blob([e.data], { type: e.data.type });
-		blobUrl = window.URL.createObjectURL(videoBlob);
-		anchor.download = 'movie.webm';
-		anchor.href = blobUrl;
-		anchor.style.display = 'block';
-	}
-
-  //エクスポートの設定
-  //let exportButton = document.getElementById("shaderExport");
-  //function save(){
-  //  let txt = "let fragmentShader =`"+ fragmentShader + '`'
-  //  const blob = new Blob([txt], { type: 'text/plain' });
-  //  const a = document.createElement('a');
-  //  a.href =  URL.createObjectURL(blob);
-  //  a.download = 'shader.txt';
-  //  a.click();
-  //}
+  // キャンバスサイズの設定(全画面。リサイズにも追従)
+  resize();
+  window.addEventListener('resize', resize);
 
   // イベントリスナー登録
-  eCheck.addEventListener('change', checkChange, true);
   document.addEventListener("mousedown",mouseDown,true);
   document.addEventListener("mouseup",mouseUp,true);
   c.addEventListener('mousemove', mouseMove, true);
   c.addEventListener('wheel', onWheel, { passive: false });
-  rstart.addEventListener('click',() => recorder.start());
-  rstop.addEventListener('click',() => recorder.stop());
-  //exportButton.addEventListener('click',save)
-
-  // WebGL コンテキストを取得
-  gl = c.getContext('webgl');
 
   // シェーダのコンパイル
   let prg = create_program(create_shader('vs'), create_shader('fs'));
@@ -324,20 +305,20 @@ window.onload = function(){
 
   // その他の初期化
   gl.clearColor(0.0, 0.0, 0.0, 1.0);
-  startTime = new Date().getTime();
+
+  // ヒントは一定時間操作が無ければ自動的に消す。
+  setTimeout(() => { if (!userEngaged) hint.classList.add('faded'); }, 7000);
 
   // レンダリング
-  render();
+  requestAnimationFrame(frame);
 };
 
-function render(){
-  if (run === false) {
-    return;
-  }
-  let moment = (new Date().getTime() - timenow)/1000;
-  timenow = new Date().getTime();
+let lastTime = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
 
-  updateCycle(moment);
+  updateCycle(dt);
   const dist = currentDist(cycleT);
   // 自動首振り(基準の上方向まわりの一定回転)とドラッグ(クォータニオンで
   // 累積・制限なし)を合成する。
@@ -352,7 +333,7 @@ function render(){
 
   // 手持ちカメラのような微小なランダム揺れをcDirへ上乗せする(実時間基準
   // なのでフレームレートに依らない)。位置には影響させない。
-  const shakeT = timenow * 0.001 * SHAKE_SPEED;
+  const shakeT = now * 0.001 * SHAKE_SPEED;
   const shakeYaw = shakeNoise(shakeT, 0) * SHAKE_AMPLITUDE;
   const shakePitch = shakeNoise(shakeT, 10) * SHAKE_AMPLITUDE;
   const shakeQuat = normalizeQuat(
@@ -364,14 +345,13 @@ function render(){
   cDir = Quatarnion.vec(shakenF[0], shakenF[1], shakenF[2]);
   cPos = Quatarnion.vec(cam.P[0], cam.P[1], cam.P[2]);
 
-  window.requestAnimationFrame(render, c);
-  // 時間管理
+  requestAnimationFrame(frame);
 
   // カラーバッファをクリア
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   // uniform 関連
-  gl.uniform1f(uniLocation[0], (timenow - startTime + tempTime) * 0.001);
+  gl.uniform1f(uniLocation[0], now * 0.001);
   gl.uniform2fv(uniLocation[1], [cw, ch]);
   gl.uniform3fv(uniLocation[2], cDir.tovec());
   gl.uniform3fv(uniLocation[3], cPos.tovec());
@@ -379,6 +359,8 @@ function render(){
   // 描画
   gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
   gl.flush();
+
+  updateHUD(dist);
 }
 
 function create_shader(id){
@@ -482,18 +464,33 @@ function create_ibo(data){
   return ibo;
 }
 
-//check box チェックされている間だけレンダリング
-function checkChange(e) {
-  run = e.currentTarget.checked;
-  console.log(run);
-  if(run){
-    startTime = new Date().getTime();
-    timenow = new Date().getTime();
-    render();
-  }else{
-    tempTime += timenow - startTime;
+// ズーム進捗(overviewで0、DIST_MINで1)。対数スケールで一定速度に潜る
+// 設計に合わせ、log10距離で線形補間する。HUDの表示に使う。
+function zoomProgress(dist) {
+  const zoomExp = Math.log10(Math.max(OVERVIEW_DIST / dist, 1));
+  const maxExp = Math.log10(OVERVIEW_DIST / DIST_MIN);
+  return clamp(zoomExp / maxExp, 0, 1);
+}
+
+function updateHUD(dist) {
+  const zoomFactor = OVERVIEW_DIST / dist;
+  const zoomExp = Math.log10(Math.max(zoomFactor, 1));
+  zoomReadout.textContent = `10^${zoomExp.toFixed(2)}×`;
+  zoomBarFill.style.width = `${zoomProgress(dist) * 100}%`;
+  zoomPhaseEl.textContent =
+    phase === "overview" ? "全体像を確認中…" :
+    phase === "fade" ? "次のポイントへ移動中…" :
+    "同じ地点へズームイン中…";
+}
+
+// 初回操作でヒントをフェードアウトさせる。
+let userEngaged = false;
+function engage() {
+  if (!userEngaged) {
+    userEngaged = true;
+    hint.classList.add('faded');
   }
-};
+}
 
 //マウスインターフェース
 function mouseMove(e){
@@ -502,8 +499,10 @@ function mouseMove(e){
       mouseflag=false;
       return;
     };
-    let dx =(-0.7 * (e.offsetX-centorx) / cw);
-    let dy =(0.7 * (e.offsetY-centory) / ch);
+    // offsetX/YはCSSピクセル基準なので、backing resolution(cw/ch)ではなく
+    // 表示サイズ(clientWidth/Height)で正規化する。
+    let dx =(-0.7 * (e.offsetX-centorx) / c.clientWidth);
+    let dy =(0.7 * (e.offsetY-centory) / c.clientHeight);
     centorx=e.offsetX;
     centory=e.offsetY;
     cRotate(dx,dy);
@@ -511,10 +510,10 @@ function mouseMove(e){
 };
 
 function mouseDown(e) {
-  if (run===false){return;};
   mouseflag=true;
   centorx=e.offsetX;
   centory=e.offsetY;
+  engage();
 };
 
 function mouseUp(e) {
@@ -534,6 +533,7 @@ function cRotate(dx,dy) {
 // ホイールでズームサイクルの進行速度を上げ下げする。
 function onWheel(e) {
   e.preventDefault();
+  engage();
   speedMult = clamp(
     speedMult * Math.exp(-e.deltaY * WHEEL_SENSITIVITY),
     WHEEL_SPEED_MULT_RANGE[0],

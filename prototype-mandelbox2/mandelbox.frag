@@ -13,6 +13,22 @@ const vec3 LightDir = normalize(vec3(2.0,1.0,1.0));
 const int Iteration =128;
 const int MAX_REFRECT = 2;
 
+// 表面判定のイプシロンは固定値ではなく、レイの進行距離(ray.len)×1ピクセルが
+// 投影される角度サイズ、で決める。遠くのレイほど1ピクセルが指すワールド座標上
+// の幅が広がるため、固定の小さいイプシロンのままだと遠景で細部を解像しきれず
+// 表面が点在するノイズになる。EPS_MIN(元の固定しきい値0.001をそのまま踏襲)を
+// 下限として、遠方ではレイの進行距離に比例して広げる。
+const float EPS_PIXEL_MULT = 1.5;
+const float EPS_MIN = 0.001;
+
+float pixelAngle(){
+  return FOV * 2.0 / min(resolution.x, resolution.y);
+}
+
+float hitEps(float len){
+  return max(EPS_MIN, len * pixelAngle() * EPS_PIXEL_MULT);
+}
+
 struct rayobj{
   vec3  rPos;     //レイの場所
   vec3  direction;//方向
@@ -260,13 +276,16 @@ int materialOf(int objectID){
   }
 }
 
-vec3 normal(vec3 p){
-  float d = 0.0001;
+vec3 normal(vec3 p, float d){
   return normalize(vec3(
     distanceFunction(p + vec3(  d, 0.0, 0.0)).dist - distanceFunction(p + vec3( -d, 0.0, 0.0)).dist,
     distanceFunction(p + vec3(0.0,   d, 0.0)).dist - distanceFunction(p + vec3(0.0,  -d, 0.0)).dist,
     distanceFunction(p + vec3(0.0, 0.0,   d)).dist - distanceFunction(p + vec3(0.0, 0.0,  -d)).dist
   ));
+}
+
+vec3 normal(vec3 p){
+  return normal(p, 0.0001);
 }
 
 
@@ -332,8 +351,8 @@ void raymarch(inout rayobj ray){
   for(int i = 0; i < Iteration; i++){
     dfstruct df = distanceFunction(ray.rPos);
     ray.distance = df.dist;
-    if(ray.distance < 0.001){
-      ray.normal = normal(ray.rPos);
+    if(ray.distance < hitEps(ray.len)){
+      ray.normal = normal(ray.rPos, hitEps(ray.len) * 0.5);
       ray.objectID = df.id;
       ray.iterate = float(i)/float(Iteration);
       return;
@@ -472,7 +491,7 @@ void reflectFunc(inout rayobj ray){//反射
     raymarch(rays[i+1]);
     rays[i+1].material = materialOf(rays[i+1].objectID);
 
-    if(abs(rays[i].distance) >= 0.001){//脱出
+    if(abs(rays[i].distance) >= hitEps(rays[i].len)){//脱出
       escape = i;
       break;
     }
@@ -481,7 +500,7 @@ void reflectFunc(inout rayobj ray){//反射
   for (int i = MAX_REFRECT;i >= 1;i--){
     if (i>escape){continue;}
 
-    if(abs(ray.distance) < 0.001){//物体表面にいる場合
+    if(abs(ray.distance) < hitEps(ray.len)){//物体表面にいる場合
       if(effect.ambient){
         ambientFunc(rays[i]);
       }
@@ -532,7 +551,7 @@ void main(void){
   ray.material = materialOf(ray.objectID);
 
   //エフェクト
-  if(abs(ray.distance) < 0.001){//物体表面にいる場合
+  if(abs(ray.distance) < hitEps(ray.len)){//物体表面にいる場合
     if (effect.reflect){
       reflectFunc(ray);
     }

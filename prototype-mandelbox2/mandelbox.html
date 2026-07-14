@@ -1,32 +1,32 @@
 <!DOCTYPE html>
-<html><head>
-<script id="fs" class="x-shader/x-fragment" src="mandelbox.frag" type="text/javascript"></script>
-
-<script id="vs" class="x-shader/x-vertex" src="shader.vert" type="text/javascript"></script>
-
+<html lang="ja"><head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>マンデルボックスのレイマーチ(参考実装)</title>
 <link href="style.css" rel="stylesheet">
 
+<script id="fs" class="x-shader/x-fragment" src="mandelbox.frag" type="text/javascript"></script>
+<script id="vs" class="x-shader/x-vertex" src="shader.vert" type="text/javascript"></script>
 <script src="quaternion.js" type="text/javascript"></script>
-
 <script src="raymarch.js" type="text/javascript"></script>
-
-<script src="https://webglfundamentals.org/webgl/resources/webgl-utils.js"></script>
-
 </head>
 <body>
-  <div id="canvasWrap">
-    <canvas id="canvas"></canvas>
-    <div id="fadeOverlay"></div>
+  <canvas id="canvas"></canvas>
+  <div id="fadeOverlay"></div>
+
+  <div id="label" class="label">MANDELBOX — REFERENCE SHADER</div>
+
+  <div id="hint" class="hint">
+    ドラッグで視点を微調整・ホイールでズーム速度を調整。時間が経つと自動で同じ場所へ潜っていきます。
   </div>
-  <p><input type="checkbox" id="check" checked><label for="check"> auto run</label></p>
-  <button id = "recStart"><span id = "recIcon">●</span>REC</button>
-  <button id = "recStop">STOP</button>
-  <p><a href="#" id="downloadlink">ダウンロード</a></p>
-  <!--<p><button id = "shaderExport">エクスポート</button></p>-->
-  <h2>操作説明</h2>
-  <p>同じ地点へ潜り続け、精度限界に達するとフェードして次のポイントへ移ります。</p>
-  <p>ドラッグで視線を回転、ホイールでズームサイクルの速度を調整できます。</p>
-  <p>auto runチェックボックスからチェックを外すと画面の更新を停止します。</p>
-  <p>RECボタンで録画開始、STOPボタンで録画終了。録画終了時にwebm形式の動画のダウンロードリンクが生成されます。</p>
+
+  <div id="zoomPanel" class="zoom-panel">
+    <div class="zoom-row">
+      <span class="zoom-label">ZOOM</span>
+      <span id="zoomReadout" class="zoom-value">10^0.00×</span>
+    </div>
+    <div class="zoom-bar-track"><div id="zoomBarFill" class="zoom-bar-fill"></div></div>
+    <div id="zoomPhase" class="zoom-phase">全体像を確認中…</div>
+  </div>
 </body>
 </html>
