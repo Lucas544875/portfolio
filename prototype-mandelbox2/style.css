@@ -1,0 +1,31 @@
+*{
+  text-align: center;
+  margin: 10px auto;
+  background-color: #222222;
+  color :aliceblue;
+}
+canvas{
+  border: 1px solid black;
+}
+#recIcon{
+  color :red;
+}
+#downloadlink{
+  display:none;
+}
+
+.link{
+  background-color: aliceblue;
+  display: flex;
+	justify-content: center;
+	align-items: center;
+	position: relative;
+	width: 300px;
+	height: 60px;
+	color: #333;
+	font-size: 18px;
+	font-weight: 700;
+	text-decoration: none;
+	cursor: pointer;
+	margin: 25pt auto;
+}

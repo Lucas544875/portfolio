@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head>
+<script id="fs" class="x-shader/x-fragment" src="mandelbox.frag" type="text/javascript"></script>
+
+<script id="vs" class="x-shader/x-vertex" src="shader.vert" type="text/javascript"></script>
+
+<link href="style.css" rel="stylesheet">
+
+<script src="quaternion.js" type="text/javascript"></script>
+
+<script src="longPress.js" type="text/javascript"></script>
+
+<script src="raymarch.js" type="text/javascript"></script>
+
+<script src="https://webglfundamentals.org/webgl/resources/webgl-utils.js"></script>
+
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <p><input type="checkbox" id="check" checked><label for="check"> auto run</label></p>
+  <button id = "recStart"><span id = "recIcon">●</span>REC</button>
+  <button id = "recStop">STOP</button>
+  <p><a href="#" id="downloadlink">ダウンロード</a></p>
+  <!--<p><button id = "shaderExport">エクスポート</button></p>-->
+  <h2>操作説明</h2>
+  <p>W:前進 /A:左 /S:後退 /D:右 /Q:上昇 /E:下降</p>
+  <p>auto runチェックボックスからチェックを外すと画面の更新を停止します。</p>
+  <p>RECボタンで録画開始、STOPボタンで録画終了。録画終了時にwebm形式の動画のダウンロードリンクが生成されます。</p>
+</body>
+</html>
