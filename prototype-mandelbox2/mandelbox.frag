@@ -21,8 +21,8 @@ const float STEP_SAFETY = 0.93; // オーバーシュート対策の安全率(pr
 // の幅が広がるため、固定の小さいイプシロンのままだと遠景で細部を解像しきれず
 // 表面が点在するノイズになる。EPS_MINはDIST_MIN(raymarch.js側、5e-5)より
 // 十分小さい絶対下限で、通常はt*pixelAngle*EPS_PIXEL_MULTの方が支配的になる。
-const float EPS_PIXEL_MULT = 2.0;
-const float EPS_MIN = 1e-8;
+const float EPS_PIXEL_MULT = 1.5;
+const float EPS_MIN = 5e-8;
 const float EPS_MAX = 0.1;
 
 float pixelAngle(){
