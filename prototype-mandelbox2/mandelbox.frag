@@ -1,33 +1,146 @@
 let fragmentShader =`
-precision mediump float;
+precision highp float;
 uniform float time;
 uniform vec2  resolution;
 uniform vec3  cDir;
-uniform vec3  cPos;
+uniform vec3  uP0_hi; // 潜る先の1点 p0 の上位(float32丸め)成分
+uniform vec3  uP0_lo; // p0 の残差(下位)成分。uP0_hiと合わせてdf64のp0を成す
+uniform vec3  uCamOffset; // カメラ位置 - p0
 
 const float PI = 3.14159265;
 const float E = 2.71828182;
 const float INFINITY = 1.e20;
 const float FOV = 30.0 * 0.5 * PI / 180.0;//field of view
 const vec3 LightDir = normalize(vec3(2.0,1.0,1.0));
-const int Iteration =128;
+const int Iteration = 280;
 const int MAX_REFRECT = 2;
+const float STEP_SAFETY = 0.93; // オーバーシュート対策の安全率(prototype-mandelboxと同じ)
 
 // 表面判定のイプシロンは固定値ではなく、レイの進行距離(ray.len)×1ピクセルが
 // 投影される角度サイズ、で決める。遠くのレイほど1ピクセルが指すワールド座標上
 // の幅が広がるため、固定の小さいイプシロンのままだと遠景で細部を解像しきれず
-// 表面が点在するノイズになる。EPS_MIN(元の固定しきい値0.001をそのまま踏襲)を
-// 下限として、遠方ではレイの進行距離に比例して広げる。
-const float EPS_PIXEL_MULT = 1.5;
-const float EPS_MIN = 0.001;
+// 表面が点在するノイズになる。EPS_MINはDIST_MIN(raymarch.js側、5e-5)より
+// 十分小さい絶対下限で、通常はt*pixelAngle*EPS_PIXEL_MULTの方が支配的になる。
+const float EPS_PIXEL_MULT = 2.0;
+const float EPS_MIN = 1e-8;
+const float EPS_MAX = 0.1;
 
 float pixelAngle(){
   return FOV * 2.0 / min(resolution.x, resolution.y);
 }
 
 float hitEps(float len){
-  return max(EPS_MIN, len * pixelAngle() * EPS_PIXEL_MULT);
+  return clamp(len * pixelAngle() * EPS_PIXEL_MULT, EPS_MIN, EPS_MAX);
 }
+
+// ----------------------------------------------------------------------------
+// df64: float32の(hi, lo)ペアで倍精度相当を再現する「double-float」演算
+// (prototype-mandelboxのmain.jsから移植)。WebGL1にはハードウェアのdouble型が
+// 無いため、座標だけをこの表現で持ち回ることで、素のfloat32では相対オフセット
+// ~1e-6程度で崩れる精度を~1e-12〜1e-14付近まで伸ばす。
+// ----------------------------------------------------------------------------
+vec2 twoSum(float a, float b) {
+  float s = a + b;
+  float v = s - a;
+  float e = (a - (s - v)) + (b - v);
+  return vec2(s, e);
+}
+vec2 quickTwoSum(float a, float b) {
+  float s = a + b;
+  float e = b - (s - a);
+  return vec2(s, e);
+}
+void split32(float a, out float hi, out float lo) {
+  float c = 4097.0 * a; // 2^12+1: float32(24bit仮数部)向けのVeltkamp分割定数
+  hi = c - (c - a);
+  lo = a - hi;
+}
+vec2 twoProd(float a, float b) {
+  float p = a * b;
+  float aHi, aLo, bHi, bLo;
+  split32(a, aHi, aLo);
+  split32(b, bHi, bLo);
+  float e = ((aHi * bHi - p) + aHi * bLo + aLo * bHi) + aLo * bLo;
+  return vec2(p, e);
+}
+vec2 dfAdd(vec2 a, vec2 b) {
+  vec2 s = twoSum(a.x, b.x);
+  s.y += a.y + b.y;
+  return quickTwoSum(s.x, s.y);
+}
+vec2 dfAddF(vec2 a, float b) {
+  vec2 s = twoSum(a.x, b);
+  s.y += a.y;
+  return quickTwoSum(s.x, s.y);
+}
+vec2 dfSub(vec2 a, vec2 b) { return dfAdd(a, vec2(-b.x, -b.y)); }
+vec2 dfMul(vec2 a, vec2 b) {
+  vec2 p = twoProd(a.x, b.x);
+  p.y += a.x * b.y + a.y * b.x;
+  return quickTwoSum(p.x, p.y);
+}
+vec2 dfMulF(vec2 a, float b) {
+  vec2 p = twoProd(a.x, b);
+  p.y += a.y * b;
+  return quickTwoSum(p.x, p.y);
+}
+vec2 dfDiv(vec2 a, vec2 b) {
+  float q1 = a.x / b.x;
+  vec2 r = dfSub(a, dfMulF(b, q1));
+  float q2 = r.x / b.x;
+  r = dfSub(r, dfMulF(b, q2));
+  float q3 = r.x / b.x;
+  vec2 q = quickTwoSum(q1, q2);
+  return dfAddF(q, q3);
+}
+vec2 dfFromFloat(float a) { return vec2(a, 0.0); }
+float dfToFloat(vec2 a) { return a.x + a.y; }
+
+// vec3を成分ごとにdf64で保持する「倍精度座標」。
+struct DF3 { vec3 hi; vec3 lo; };
+
+vec3 df3ToVec3(DF3 a) { return a.hi + a.lo; }
+
+DF3 df3AddVec3(DF3 a, vec3 b) {
+  vec2 rx = dfAddF(vec2(a.hi.x, a.lo.x), b.x);
+  vec2 ry = dfAddF(vec2(a.hi.y, a.lo.y), b.y);
+  vec2 rz = dfAddF(vec2(a.hi.z, a.lo.z), b.z);
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+DF3 df3Add(DF3 a, DF3 b) {
+  vec2 rx = dfAdd(vec2(a.hi.x, a.lo.x), vec2(b.hi.x, b.lo.x));
+  vec2 ry = dfAdd(vec2(a.hi.y, a.lo.y), vec2(b.hi.y, b.lo.y));
+  vec2 rz = dfAdd(vec2(a.hi.z, a.lo.z), vec2(b.hi.z, b.lo.z));
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+DF3 df3Sub(DF3 a, DF3 b) { return df3Add(a, DF3(-b.hi, -b.lo)); }
+DF3 df3MulF(DF3 a, float s) {
+  vec2 rx = dfMulF(vec2(a.hi.x, a.lo.x), s);
+  vec2 ry = dfMulF(vec2(a.hi.y, a.lo.y), s);
+  vec2 rz = dfMulF(vec2(a.hi.z, a.lo.z), s);
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+DF3 df3MulDF(DF3 a, vec2 s) {
+  vec2 rx = dfMul(vec2(a.hi.x, a.lo.x), s);
+  vec2 ry = dfMul(vec2(a.hi.y, a.lo.y), s);
+  vec2 rz = dfMul(vec2(a.hi.z, a.lo.z), s);
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+vec2 df3Dot(DF3 a, DF3 b) {
+  vec2 x = dfMul(vec2(a.hi.x, a.lo.x), vec2(b.hi.x, b.lo.x));
+  vec2 y = dfMul(vec2(a.hi.y, a.lo.y), vec2(b.hi.y, b.lo.y));
+  vec2 z = dfMul(vec2(a.hi.z, a.lo.z), vec2(b.hi.z, b.lo.z));
+  return dfAdd(dfAdd(x, y), z);
+}
+// box-foldのclamp: 判定はhi成分だけで行う(fold境界ぎりぎりの際どいケースでだけ
+// 生じうる誤差は無視できるほど稀)。範囲内ならlo成分もそのまま保持し、範囲外に
+// 丸めた成分だけlo=0にする。
+DF3 df3ClampFold(DF3 a, float lo, float hi) {
+  vec3 rHi = clamp(a.hi, lo, hi);
+  vec3 inRange = step(vec3(lo), a.hi) * step(a.hi, vec3(hi));
+  return DF3(rHi, a.lo * inRange);
+}
+DF3 df3FromVec3(vec3 v) { return DF3(v, vec3(0.0)); }
 
 struct rayobj{
   vec3  rPos;     //レイの場所
@@ -142,40 +255,70 @@ float plane1(vec3 z){//plane
   return plane(z,vec3(0.0,0.0,1.0),1.0);
 }
 
+// マンデルボックスのDEパラメータ。素のfloat32版(sphereFold/boxFold/mandelBox)と
+// df64版(mandelBoxDF)の両方から参照し、数値が二重管理でずれないようにする。
+const float MB_SCALE = -2.18;
+const float MB_MINR2 = 0.60;
+const float MB_FIXEDR2 = 2.65;
+const float MB_FOLD = 1.14;
+const int MB_ITER = 16;
+
 void sphereFold(inout vec3 z, inout float dz) {
-  float minRadius2=0.60;//定数
-  float fixedRadius2=2.65;//定数
 	float r2 = dot(z,z);
-	if (r2<minRadius2) { 
+	if (r2<MB_MINR2) {
 		// linear inner scaling
-		float temp = fixedRadius2/(minRadius2);
+		float temp = MB_FIXEDR2/(MB_MINR2);
 		z *= temp;
 		dz*= temp;
-	} else if (r2<fixedRadius2) { 
+	} else if (r2<MB_FIXEDR2) {
 		// this is the actual sphere inversion
-		float temp =fixedRadius2/r2;
+		float temp =MB_FIXEDR2/r2;
 		z *= temp;
 		dz*= temp;
 	}
 }
 
 void boxFold(inout vec3 z, inout float dz) {
-  float foldingLimit=1.14;//定数0.6
-	z = clamp(z, -foldingLimit, foldingLimit) * 2.0 - z;
+	z = clamp(z, -MB_FOLD, MB_FOLD) * 2.0 - z;
 }
 
 float mandelBox(vec3 z){
-  float Scale = -2.18 ;//定数1.9
 	vec3 offset = z;
 	float dr = 1.0;
-	for (int n = 0; n < 16; n++) {
+	for (int n = 0; n < MB_ITER; n++) {
 		boxFold(z,dr);       // Reflect
 		sphereFold(z,dr);    // Sphere Inversion
-    z=Scale*z + offset;  // Scale & Translate
-    dr = dr*abs(Scale)+1.0;
+    z=MB_SCALE*z + offset;  // Scale & Translate
+    dr = dr*abs(MB_SCALE)+1.0;
 	}
 	float r = length(z);
 	return r/abs(dr);
+}
+
+// mandelBox()のdf64版(prototype-mandelboxのmapDEと同じ式)。座標zだけをdf64で
+// 保持し、dr・MB_SCALE等はfloat32のままでよい(精度の危険因子は座標そのもの
+// であってdrの成長ではない)。
+float mandelBoxDF(DF3 p){
+  DF3 z = p;
+  float dr = 1.0;
+  for (int n = 0; n < MB_ITER; n++) {
+    z = df3Sub(df3MulF(df3ClampFold(z, -MB_FOLD, MB_FOLD), 2.0), z);
+    vec2 r2df = df3Dot(z, z);
+    float r2 = dfToFloat(r2df);
+    if (r2 < MB_MINR2) {
+      float t = MB_FIXEDR2 / MB_MINR2;
+      z = df3MulF(z, t);
+      dr *= t;
+    } else if (r2 < MB_FIXEDR2) {
+      vec2 t = dfDiv(dfFromFloat(MB_FIXEDR2), r2df);
+      z = df3MulDF(z, t);
+      dr *= dfToFloat(t);
+    }
+    z = df3Add(df3MulF(z, MB_SCALE), p);
+    dr = dr * abs(MB_SCALE) + 1.0;
+  }
+  vec3 zf = df3ToVec3(z);
+  return length(zf) / abs(dr);
 }
 
 float sdCross(vec3 p, float c) {
@@ -251,6 +394,11 @@ dfstruct distanceFunction(vec3 z){
   return mandelBox;
 }
 
+dfstruct distanceFunction(DF3 z){
+  dfstruct mandelBox = dfstruct(mandelBoxDF(z),0);
+  return mandelBox;
+}
+
 //マテリアルの設定
 const int SAIHATE = 0;
 const int CYAN = 1;
@@ -286,6 +434,16 @@ vec3 normal(vec3 p, float d){
 
 vec3 normal(vec3 p){
   return normal(p, 0.0001);
+}
+
+// 法線の差分ステップ幅もヒットエプシロンと同じ倍率精度基準で決める必要が
+// あるため、rPos(hi/lo)まわりの微小オフセットをdf64の補正加算で足し込む。
+vec3 normal(DF3 p, float d){
+  return normalize(vec3(
+    distanceFunction(df3AddVec3(p, vec3(  d, 0.0, 0.0))).dist - distanceFunction(df3AddVec3(p, vec3( -d, 0.0, 0.0))).dist,
+    distanceFunction(df3AddVec3(p, vec3(0.0,   d, 0.0))).dist - distanceFunction(df3AddVec3(p, vec3(0.0,  -d, 0.0))).dist,
+    distanceFunction(df3AddVec3(p, vec3(0.0, 0.0,   d))).dist - distanceFunction(df3AddVec3(p, vec3(0.0, 0.0,  -d))).dist
+  ));
 }
 
 
@@ -347,23 +505,30 @@ float refrectance(int material){
 }
 
 
-void raymarch(inout rayobj ray){
+// roはレイ原点(df64)。毎ステップ ro + direction*ray.len をdf64の補正加算で
+// 組み直すことで位置を求める(素のfloat32でray.rPosへ距離を毎回加算していく
+// と、O(1)の座標が持てるulp幅より小さい前進が丸めで消えてしまい、深く潜った
+// ところで精度が頭打ちになる——prototype-mandelboxのmain.js参照)。ray.lenは
+// スカラーなのでこの丸め問題を受けず、通常のfloat32のまま安全に累積できる。
+void raymarch(inout rayobj ray, DF3 ro){
   for(int i = 0; i < Iteration; i++){
-    dfstruct df = distanceFunction(ray.rPos);
+    DF3 p = df3AddVec3(ro, ray.direction * ray.len);
+    dfstruct df = distanceFunction(p);
     ray.distance = df.dist;
     if(ray.distance < hitEps(ray.len)){
-      ray.normal = normal(ray.rPos, hitEps(ray.len) * 0.5);
+      ray.rPos = df3ToVec3(p);
+      ray.normal = normal(p, hitEps(ray.len) * 0.5);
       ray.objectID = df.id;
       ray.iterate = float(i)/float(Iteration);
       return;
     }
-    ray.len += ray.distance;
+    ray.len += ray.distance * STEP_SAFETY;
     if(ray.len > 100.0){
+      ray.rPos = df3ToVec3(p);
       ray.objectID = 98;
       ray.iterate = float(i)/float(Iteration);
       return;
     }
-    ray.rPos += ray.distance * ray.direction;
   }
   ray.objectID = 99;
   ray.iterate = 1.0;
@@ -441,7 +606,7 @@ void shadowFunc(inout rayobj ray){
 void globallightFunc(inout rayobj ray){//大域照明
   vec3 origin = ray.rPos+ray.normal*0.001;
   rayobj ray2 = rayobj(origin,ray.normal,0.0,0.0,0.0,99,0,vec3(0.0),vec3(0.0));
-  raymarch(ray2);
+  raymarch(ray2, df3FromVec3(origin));
   float near = 0.10;
   ray.fragColor *= clamp(min(near,ray2.len)/near,0.0,1.0);
 }
@@ -487,8 +652,9 @@ void reflectFunc(inout rayobj ray){//反射
   for (int i = 0;i<MAX_REFRECT;i++){
     float dot = -dot(rays[i].direction,rays[i].normal);
     vec3 direction=rays[i].direction+2.0*dot*rays[i].normal;//refrect
-    rays[i+1] = rayobj(rays[i].rPos+rays[i].normal*0.001,direction,0.0,0.0,0.0,99,0,vec3(0.0),vec3(0.0));
-    raymarch(rays[i+1]);
+    vec3 bounceOrigin = rays[i].rPos+rays[i].normal*0.001;
+    rays[i+1] = rayobj(bounceOrigin,direction,0.0,0.0,0.0,99,0,vec3(0.0),vec3(0.0));
+    raymarch(rays[i+1], df3FromVec3(bounceOrigin));
     rays[i+1].material = materialOf(rays[i+1].objectID);
 
     if(abs(rays[i].distance) >= hitEps(rays[i].len)){//脱出
@@ -546,8 +712,10 @@ void main(void){
   vec3 direction = normalize(turn(vec4(0,cDir),rot).yzw);
 
   //レイの定義と移動
-  rayobj ray = rayobj(cPos,direction,0.0,0.0,0.0,99,0,vec3(0.0),vec3(0.0));
-  raymarch(ray);
+  DF3 p0 = DF3(uP0_hi, uP0_lo);
+  DF3 ro = df3AddVec3(p0, uCamOffset);
+  rayobj ray = rayobj(vec3(0.0),direction,0.0,0.0,0.0,99,0,vec3(0.0),vec3(0.0));
+  raymarch(ray, ro);
   ray.material = materialOf(ray.objectID);
 
   //エフェクト

@@ -3,11 +3,10 @@ let c, cw, ch, gl, fadeOverlay, hint, zoomReadout, zoomBarFill, zoomPhaseEl;
 let mouseflag=false;
 let centorx;
 let centory;
-let uniLocation = [];
+let uniLocation = {};
 let vAttLocation = [];
 let attStride = [];
 let cDir;
-let cPos;
 
 // 全画面表示。タッチ端末では描画負荷を抑えるためレンダースケール・DPR上限を
 // 落とす(main.jsのプロトタイプと同じ方針)。
@@ -76,7 +75,20 @@ function vcross(a, b) {
   ];
 }
 function vadd(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 function vscale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+
+// JSの倍精度(number)を、GPUへdf64として渡すためのfloat32ペア(hi,lo)に
+// 分割する(prototype-mandelboxのmain.jsと同じ手法)。
+function splitFloat(x) {
+  const hi = Math.fround(x);
+  const lo = Math.fround(x - hi);
+  return [hi, lo];
+}
+function splitVec3(v) {
+  const sx = splitFloat(v[0]), sy = splitFloat(v[1]), sz = splitFloat(v[2]);
+  return { hi: [sx[0], sy[0], sz[0]], lo: [sx[1], sy[1], sz[1]] };
+}
 
 // Quatarnion.normalize()は二乗ノルムで割ってしまう実装のため使わず、
 // 正しい .norm(平方根)で割る。
@@ -146,9 +158,12 @@ function pickTarget() {
 
 // ----------------------------------------------------------------------------
 // カメラ: p0を通る1本の視線の上を前後するだけ(mandelbox.frag側はcDirから
-// xAxes/yAxesを毎フラグメント自前で作り直すので、JS側もcDir/cPosの2本だけ
-// 渡せばよく、R/Uをuniformで送る必要はない)。ドラッグ・自動首振り・手ブレは
-// すべてこの基準方向へのクォータニオン回転として上乗せする。
+// xAxes/yAxesを毎フラグメント自前で作り直すので、JS側もcDirの1本だけ渡せば
+// よく、R/Uをuniformで送る必要はない)。位置はp0(df64のhi/lo)+camOffset
+// (float32、dist基準の小さな相対オフセット)としてGPU側で合成する
+// (prototype-mandelbox/README.md「df64(double-float)による倍精度」と
+// 同じ設計)。ドラッグ・自動首振り・手ブレはすべてこの基準方向への
+// クォータニオン回転として上乗せする。
 // ----------------------------------------------------------------------------
 function baseFrame(viewDir) {
   // mandelbox.fragの座標系はZ-up(cross(cDir, vec3(0,0,1)))なので合わせる。
@@ -171,13 +186,11 @@ function buildCameraFrame(p0, viewDir, dist, lookQuat) {
 // ズームサイクルの状態機械(overview→dive→fade→…)
 // ----------------------------------------------------------------------------
 const OVERVIEW_DIST = 11.0; // 参考サイト自身の初期カメラ距離(11,0,0)と一致
-// mandelbox.fragはdf64を持たずmediump精度・固定ヒットしきい値(0.001)・
-// 固定ステップ数(128)の素朴なsphere tracingのため、深く潜りすぎると
-// (シェーダを変更せずには直せない)精度崩壊が先に出てしまう。ヒット
-// しきい値の10倍以上の余裕を残す0.01を下限にした。
-const DIST_MIN = 0.01;
+// mandelbox.fragにもprototype-mandelboxと同じdf64(double-float)を移植した
+// ため、DIST_MINもprototype-mandelbox(main.js)と同じ値まで潜れる。
+const DIST_MIN = 5e-5;
 const ORBIT_DURATION = 4.0; // 秒。overviewフェーズの長さ
-const DIVE_DURATION = 13.0; // 秒。diveフェーズの長さ
+const DIVE_DURATION = 23.0; // 秒。diveフェーズの長さ(prototype-mandelboxと同じズーム幅なので同じ秒数にした)
 const FADE_DURATION = 1.1; // 秒。次の1点へ切り替える際のフェード
 const AUTO_YAW_SPEED = 0.006; // rad/秒。サイクル全体を通した緩やかな自動首振り
 
@@ -271,10 +284,12 @@ window.onload = function(){
   let prg = create_program(create_shader('vs'), create_shader('fs'));
 
   //unifoem,atteibute変数の設定
-  uniLocation[0] = gl.getUniformLocation(prg, 'time');
-  uniLocation[1] = gl.getUniformLocation(prg, 'resolution');
-  uniLocation[2] = gl.getUniformLocation(prg, 'cDir');
-  uniLocation[3] = gl.getUniformLocation(prg, 'cPos');
+  uniLocation.time = gl.getUniformLocation(prg, 'time');
+  uniLocation.resolution = gl.getUniformLocation(prg, 'resolution');
+  uniLocation.cDir = gl.getUniformLocation(prg, 'cDir');
+  uniLocation.p0hi = gl.getUniformLocation(prg, 'uP0_hi');
+  uniLocation.p0lo = gl.getUniformLocation(prg, 'uP0_lo');
+  uniLocation.camOffset = gl.getUniformLocation(prg, 'uCamOffset');
 
   vAttLocation[0] = gl.getAttribLocation(prg, 'position');
   attStride[0] = 3;
@@ -343,7 +358,13 @@ function frame(now){
   const shakenF = qRotateVec(shakeQuat, cam.F);
 
   cDir = Quatarnion.vec(shakenF[0], shakenF[1], shakenF[2]);
-  cPos = Quatarnion.vec(cam.P[0], cam.P[1], cam.P[2]);
+
+  // p0はdf64の(hi,lo)としてGPUへ渡し、camOffset(=カメラ位置-p0、JSの倍精度
+  // でも常にdistのオーダーでしか無いので精度は失われない)は通常のfloat32で
+  // 渡す。GPU側でこの2つをdf64の補正加算で合成することで、CPU側の倍精度
+  // (53bit)がボトルネックにならないようにしている。
+  const p0Split = splitVec3(target.p0);
+  const camOffset = vsub(cam.P, target.p0);
 
   requestAnimationFrame(frame);
 
@@ -351,10 +372,12 @@ function frame(now){
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   // uniform 関連
-  gl.uniform1f(uniLocation[0], now * 0.001);
-  gl.uniform2fv(uniLocation[1], [cw, ch]);
-  gl.uniform3fv(uniLocation[2], cDir.tovec());
-  gl.uniform3fv(uniLocation[3], cPos.tovec());
+  gl.uniform1f(uniLocation.time, now * 0.001);
+  gl.uniform2fv(uniLocation.resolution, [cw, ch]);
+  gl.uniform3fv(uniLocation.cDir, cDir.tovec());
+  gl.uniform3fv(uniLocation.p0hi, p0Split.hi);
+  gl.uniform3fv(uniLocation.p0lo, p0Split.lo);
+  gl.uniform3fv(uniLocation.camOffset, camOffset);
 
   // 描画
   gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
