@@ -35,8 +35,8 @@
 //     df64 の補正加算で足し込むことで行う——CPU側で先に倍精度の p0 と
 //     dist を1つの float64 に潰してしまうと、そちらの精度(53bit)が
 //     ボトルネックになってしまうため。ドラッグによる見回しは、この基準
-//     方向に対する小さな yaw/pitch の上乗せとして加える(移動そのものには
-//     影響しない)。
+//     方向に対するクォータニオン回転(制限なし、ジンバルロック無し)の
+//     上乗せとして加える(移動そのものには影響しない)。
 //  4. サイクルは「広い視点で全体を見せる(overview)→同じ1点へ対数的に
 //     潜る(dive)→精度限界でフェードし次の点を JS 側で探して差し替える
 //     (fade)」の3段。overview があることで「今どこにいるか」の全体像を
@@ -105,23 +105,29 @@ const CONFIG = {
   // 当てはめてスケールしたもの。
   GLOW_RADIUS: 2.4,
   BRIGHTNESS: 1.0, // ガンマ補正前の線形色に掛ける明るさ倍率(色相・彩度は不変)
+  // grow(ステップ消費率ベースの発光)のsmoothstep閾値。参考サイトの
+  // smoothstep(0, 0.95, iterate) は「ステップ予算の95%を使うほど複雑な
+  // 箇所」でしか発火しない厳しい閾値で、自己相似構造が常に画面を占める
+  // このプロトタイプでは100倍ズーム以降ほとんど視認できなくなっていた。
+  // 閾値を大きく緩め、もっと早い段階から強くかかるようにしている。
+  GROW_ITER_LO: 0.0,
+  GROW_ITER_HI: 0.3,
 
   // --- ズームサイクル ---
   OVERVIEW_DIST: 13.0, // 全体を見渡す距離(BOUND_RADIUSの実測値から逆算、README参照)
   // df64の中心レイ単体(オフセットを直接p0へ補正加算するケース)は理論上
   // ~1e-12〜1e-14あたりまで安定に解決できるが、画面全域(中心からズレた
-  // レイ)まで含めて実測すると、pixel-projected epsilon下での収束は
-  // それよりずっと手前、dist が旧DIST_MIN(2.5e-5)を下回るあたりから
-  // 徐々に(悪化ではなく)まばらになり始める(headless Chromiumでの実描画と
-  // Node.js上の同一ロジック再現の両方で確認、README「df64(double-float)
-  // による倍精度」参照)。df64・pickTargetの精度・pixel-projected epsilon
-  // いずれも旧実装より大幅に改善しているため、同程度の潜る深さでも「最後は
-  // 痩せて消える」ことは無くなったが、「開始から終了まで画面全体で高精細を
-  // 保つ」ことを理論上の最大深度より優先し、旧実装とほぼ同じ深さのまま
-  // 据え置いた。
-  DIST_MIN: 5e-5,
+  // レイ)まで含めると実際にはずっと手前で崩れ始める。実機・複数の
+  // pickTarget()先で実測したところ、dist~1e-4(zoom~10^5倍)あたりまでは
+  // 密でクリアな構造を保ち、~1e-5(10^6倍)前後からまばらな点状に薄れ、
+  // ~1e-7(10^7〜8倍)で実質何も見えなくなる、という経過をたどる
+  // (README「df64(double-float)による倍精度」参照)。「まばらになり
+  // 始める手前」で止まる旧設定(5e-5)はやや保守的すぎたため、
+  // 「薄れてはいくが真っ黒にはならない」範囲まで一段深くした。
+  DIST_MIN: 1e-5,
   ORBIT_DURATION: 4.0, // 秒。overview フェーズの長さ
-  DIVE_DURATION: 23.0, // 秒。dive フェーズの長さ(この間 dist は指数的にDIST_MINまで縮む)。
+  DIVE_DURATION: 26.0, // 秒。dive フェーズの長さ(この間 dist は指数的にDIST_MINまで縮む)。
+                        // DIST_MIN引き下げ分、1桁あたりの速さが変わらないよう比例して延長。
   FADE_DURATION: 1.1, // 秒。次の1点へ切り替える際のフェード
 
   // rad/秒。サイクル全体を通した緩やかな自動首振り。
@@ -138,8 +144,14 @@ const CONFIG = {
   WHEEL_SENSITIVITY: 0.0011,
   DRAG_YAW_SENSITIVITY: 0.0042,
   DRAG_PITCH_SENSITIVITY: 0.0042,
-  DRAG_YAW_CLAMP: 0.4,
-  DRAG_PITCH_CLAMP: 0.4,
+
+  // 手持ちカメラのような微小なランダム揺れ。実時間(performance.now())
+  // 基準の複数のサイン波を合成した疑似ノイズで、周期性が目立たないように
+  // している(README「カメラ」参照)。AUTO_YAW_SPEEDと違って蓄積しない
+  // 揺らぎなので、大きくしすぎない限りdive中にレイが的を外す心配はない。
+  SHAKE_AMPLITUDE: 0.01, // rad。yaw/pitchの最大振れ幅の目安
+  SHAKE_ROLL_MULT: 0.5, // rollはyaw/pitchよりやや控えめに
+  SHAKE_SPEED: 1.0, // 大きいほど手ブレが速く/小刻みになる
 };
 
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
@@ -199,6 +211,47 @@ function vcross(a, b) {
 function vadd(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
 function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 function vscale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+
+// ----------------------------------------------------------------------------
+// クォータニオン(w,x,y,z)。ドラッグによる自由な見回しをオイラー角
+// (yaw→pitch)ではなくクォータニオンの合成で表すことで、特定の角度で
+// 感度が落ちたり回転が破綻したりするジンバルロックを避け、上下逆さまも
+// 含めて任意方向へ制限なく回転できるようにする(README「カメラ」参照)。
+// ----------------------------------------------------------------------------
+function qMul(a, b) {
+  return [
+    a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+    a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+    a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+    a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+  ];
+}
+function qFromAxisAngle(axis, angle) {
+  const s = Math.sin(angle * 0.5);
+  return [Math.cos(angle * 0.5), axis[0] * s, axis[1] * s, axis[2] * s];
+}
+function qNormalize(q) {
+  const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+}
+function qRotateVec(q, v) {
+  const p = [0, v[0], v[1], v[2]];
+  const r = qMul(qMul(q, p), [q[0], -q[1], -q[2], -q[3]]);
+  return [r[1], r[2], r[3]];
+}
+const Q_IDENTITY = [1, 0, 0, 0];
+
+// 手持ちカメラの揺れを模した疑似ノイズ。周波数の異なる3つのサイン波を
+// 重ねるだけの簡易な実装だが、位相(seed)をずらして呼べば軸ごとに
+// 無相関な、いかにも人の手のブレっぽい非周期の揺れが得られる。戻り値は
+// おおよそ[-1, 1]に収まる(振幅の合計が1になるよう重み付けしてある)。
+function shakeNoise(t, seed) {
+  return (
+    Math.sin(t * 1.3 + seed) * 0.5 +
+    Math.sin(t * 2.7 + seed * 1.7) * 0.3 +
+    Math.sin(t * 5.1 + seed * 2.3) * 0.2
+  );
+}
 
 // JSの倍精度(number)を、GPUへdf64として渡すためのfloat32ペア(hi,lo)に
 // 分割する(README「df64(double-float)による倍精度」参照)。
@@ -314,6 +367,8 @@ const float DIFFUSE_INTENSITY = 1.1;
 const float INC_INTENSITY = 1.5;
 const float GLOW_RADIUS = ${f(CONFIG.GLOW_RADIUS)}; // incCenter・incRadius 兼用(参考サイトでは両方 2.0)
 const float GROW_INTENSITY = 1.0;
+const float GROW_ITER_LO = ${f(CONFIG.GROW_ITER_LO)};
+const float GROW_ITER_HI = ${f(CONFIG.GROW_ITER_HI)};
 // ガンマ補正(pow 2.2)にかける前の線形色を一律に底上げする係数。
 // 全チャンネルへ同じ倍率をかけるだけなので色相・彩度の比率は変わらず、
 // 明るさだけが持ち上がる(色味は変えずに明るくする)。
@@ -493,12 +548,15 @@ float glowPoints(vec3 p) {
 // この順で加算合成(スペキュラ・シャドウ・大域照明・反射は参考サイトでも
 // 実効的に寄与がないため省略)。iterate はレイマーチで消費したステップ数の
 // 割合(参考サイトの ray.iterate)で、細部ほど1に近づきグローが強く乗る。
+// ズーム段数を問わず自己相似の細部が常に画面を占めるこのプロトタイプでは、
+// 参考サイトの smoothstep(0, 0.95, ...) では閾値が厳しすぎ、100倍ズーム
+// 以降ほとんど発火しなくなっていたため、閾値を大きく緩めている。
 vec3 shade(vec3 p, vec3 n, float iterate) {
   vec3 col = AMBIENT_INTENSITY * BASE_COLOR;
   float diff = max(dot(n, LIGHT_DIR), 0.0);
   col = clamp(col + DIFFUSE_INTENSITY * diff * BASE_COLOR, 0.0, 1.0);
   col = clamp(col + INC_INTENSITY * GLOW_COLOR * glowPoints(p), 0.0, 1.0);
-  float growCoef = smoothstep(0.0, 0.95, iterate);
+  float growCoef = smoothstep(GROW_ITER_LO, GROW_ITER_HI, iterate);
   col += GROW_INTENSITY * growCoef * GLOW_COLOR;
   return col * BRIGHTNESS;
 }
@@ -614,32 +672,40 @@ resize();
 
 // ----------------------------------------------------------------------------
 // カメラ: p0 を通る1本の視線の上を、指数的に縮む距離 dist(t) だけ前後する。
-// yaw/pitch(自動ドリフト+ドラッグ)は、この基準方向に対する小さな首振り
-// として最後に上乗せする(README「カメラ」参照)。
+// 見回し(自動首振り+ドラッグ)はこの基準方向に対するクォータニオン回転
+// として最後に上乗せする(README「カメラ」参照)。カメラ位置 P は常に
+// 基準方向 F0 の軸上のままで、見回しは F/R/U という「見る向き」だけを
+// 回す——移動そのものには影響しない。
 // ----------------------------------------------------------------------------
-function buildCameraFrame(p0, viewDir, dist, yaw, pitch) {
+function baseFrame(viewDir) {
   const F0 = viewDir;
   const worldUp = Math.abs(F0[1]) > 0.98 ? [0, 0, 1] : [0, 1, 0];
   const R0 = vnormalize(vcross(F0, worldUp));
   const U0 = vcross(R0, F0);
+  return { F0, R0, U0 };
+}
 
-  const cy = Math.cos(yaw), sy = Math.sin(yaw);
-  const Fy = vadd(vscale(F0, cy), vscale(R0, sy));
-  const Ry = vadd(vscale(F0, -sy), vscale(R0, cy));
-
-  const cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const Fp = vadd(vscale(Fy, cp), vscale(U0, sp));
-  const Up = vadd(vscale(Fy, -sp), vscale(U0, cp));
-
+// lookQuat は基準フレーム(F0,R0,U0)に上乗せする見回し回転(自動首振り+
+// ドラッグをクォータニオンとして合成したもの)。
+function buildCameraFrame(p0, viewDir, dist, lookQuat) {
+  const { F0, R0, U0 } = baseFrame(viewDir);
+  const F = qRotateVec(lookQuat, F0);
+  const R = qRotateVec(lookQuat, R0);
+  const U = qRotateVec(lookQuat, U0);
   const P = vadd(p0, vscale(F0, -dist));
-  return { P, F: Fp, R: Ry, U: Up };
+  return { P, F, R, U };
 }
 
 // ----------------------------------------------------------------------------
 // Input
 // ----------------------------------------------------------------------------
 let autoYaw = 0;
-let dragYaw = 0, dragPitch = 0;
+let dragQuat = Q_IDENTITY; // ドラッグによる見回し(クォータニオンで累積、制限なし)
+// ドラッグの回転軸(現在のカメラのright/up)は毎フレームのレンダリング結果を
+// そのまま使う。マウス座標の差分だけでは「今どちらを向いているか」が
+// わからないため、直近の描画で確定した実際のright/upを基準にすることで、
+// 画面奥行き方向に対して常に直感的な操作感になる。
+let lastCamR = [1, 0, 0], lastCamU = [0, 1, 0];
 let speedMult = 1.0;
 
 let userEngaged = false;
@@ -675,8 +741,13 @@ canvas.addEventListener("pointermove", (e) => {
   const dy = e.clientY - lastY;
   lastX = e.clientX;
   lastY = e.clientY;
-  dragYaw = clamp(dragYaw + dx * CONFIG.DRAG_YAW_SENSITIVITY, -CONFIG.DRAG_YAW_CLAMP, CONFIG.DRAG_YAW_CLAMP);
-  dragPitch = clamp(dragPitch - dy * CONFIG.DRAG_PITCH_SENSITIVITY, -CONFIG.DRAG_PITCH_CLAMP, CONFIG.DRAG_PITCH_CLAMP);
+  // yawは「現在のup」まわり、pitchは「現在のright」まわりの微小回転として
+  // 都度合成する(クォータニオンの積は可換ではないため順序はyaw→pitchで
+  // 固定)。角度に上限を設けないため、ドラッグし続ければ上下逆さまや
+  // 真後ろを向くところまで含めて任意方向を向ける。
+  const yawQ = qFromAxisAngle(lastCamU, dx * CONFIG.DRAG_YAW_SENSITIVITY);
+  const pitchQ = qFromAxisAngle(lastCamR, -dy * CONFIG.DRAG_PITCH_SENSITIVITY);
+  dragQuat = qNormalize(qMul(pitchQ, qMul(yawQ, dragQuat)));
 });
 function endDrag() { dragging = false; }
 canvas.addEventListener("pointerup", endDrag);
@@ -710,6 +781,10 @@ function updateCycle(dt) {
       if (!pickedNewThisFade) {
         target = pickTarget();
         cycleT = 0;
+        // 画面が暗転している間にカメラの向きも基準方向へリセットする。
+        // ドラッグでの見回し・自動首振りの蓄積を次のダイブへ持ち越さない。
+        dragQuat = Q_IDENTITY;
+        autoYaw = 0;
         pickedNewThisFade = true;
       }
       fadeAlpha = 1 - (fadeT - half) / half;
@@ -758,9 +833,34 @@ function frame(now) {
   try {
     updateCycle(dt);
     const dist = currentDist(cycleT);
-    const yaw = autoYaw + dragYaw;
-    const pitch = dragPitch;
-    const cam = buildCameraFrame(target.p0, target.viewDir, dist, yaw, pitch);
+    // 自動首振り(基準の上方向まわりの一定回転)とドラッグ(クォータニオン
+    // で累積・制限なし)を合成する。autoQuatは基準フレーム(viewDir由来)
+    // に対する回転、dragQuatはその上にさらに乗る自由な見回し。
+    const { U0 } = baseFrame(target.viewDir);
+    const autoQuat = qFromAxisAngle(U0, autoYaw);
+    const lookQuat = qNormalize(qMul(dragQuat, autoQuat));
+    const cam = buildCameraFrame(target.p0, target.viewDir, dist, lookQuat);
+    // ドラッグの次回の回転軸には、手ブレを含まない安定したこのフレームを
+    // 使う(手ブレの高周波な揺れを軸に混ぜるとドラッグの感触が不安定に
+    // なるため)。
+    lastCamR = cam.R;
+    lastCamU = cam.U;
+
+    // 手持ちカメラのような微小なランダム揺れを、カメラ自身のF/R/U軸まわりの
+    // 回転として最後に上乗せする(実時間基準なのでフレームレートに依らない、
+    // README「カメラ」参照)。位置には影響させない。
+    const shakeT = now * 0.001 * CONFIG.SHAKE_SPEED;
+    const shakeYaw = shakeNoise(shakeT, 0) * CONFIG.SHAKE_AMPLITUDE;
+    const shakePitch = shakeNoise(shakeT, 10) * CONFIG.SHAKE_AMPLITUDE;
+    const shakeRoll = shakeNoise(shakeT, 20) * CONFIG.SHAKE_AMPLITUDE * CONFIG.SHAKE_ROLL_MULT;
+    const shakeQuat = qNormalize(qMul(
+      qFromAxisAngle(cam.F, shakeRoll),
+      qMul(qFromAxisAngle(cam.U, shakeYaw), qFromAxisAngle(cam.R, shakePitch))
+    ));
+    const shakenF = qRotateVec(shakeQuat, cam.F);
+    const shakenR = qRotateVec(shakeQuat, cam.R);
+    const shakenU = qRotateVec(shakeQuat, cam.U);
+
     const maxDist = dist * CONFIG.FAR_MULT;
     // p0はdf64の(hi,lo)としてGPUへ渡し、camOffset(=カメラ位置-p0、
     // JSの倍精度でも常にdistのオーダーでしか無いので精度は失われない)は
@@ -776,9 +876,9 @@ function frame(now) {
     gl.uniform3fv(uLoc.P0hi, p0Split.hi);
     gl.uniform3fv(uLoc.P0lo, p0Split.lo);
     gl.uniform3fv(uLoc.camOffset, camOffset);
-    gl.uniform3fv(uLoc.F, cam.F);
-    gl.uniform3fv(uLoc.R, cam.R);
-    gl.uniform3fv(uLoc.U, cam.U);
+    gl.uniform3fv(uLoc.F, shakenF);
+    gl.uniform3fv(uLoc.R, shakenR);
+    gl.uniform3fv(uLoc.U, shakenU);
     gl.uniform1f(uLoc.maxDist, maxDist);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
