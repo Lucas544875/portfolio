@@ -36,6 +36,7 @@ function resize() {
   c.width = cw;
   c.height = ch;
   if (gl) gl.viewport(0, 0, cw, ch);
+  dirty = true; // リサイズでキャンバスの内容が失われるため再描画が必要
 }
 
 // ----------------------------------------------------------------------------
@@ -258,6 +259,11 @@ let speedMult = 1.0;
 // 凍結する(ドラッグでの見回しはそのまま効く)。lastTimeはframe()の先頭で
 // 毎フレーム更新し続けるため、再開時に大きなdtが一気に流れ込むことはない。
 let paused = false;
+// 一時停止中はカメラも静止しているフレームがほとんどなので、dirtyが立って
+// いる時だけカメラ計算・GPU描画(raymarchはフラグメントシェーダの中で最も
+// 重い処理)・HUD更新を行う。ドラッグ回転(cRotate)・リサイズ・一時停止の
+// 切り替え時にdirty=trueへ戻す。再生中は毎フレーム必ず変化するため常にtrue。
+let dirty = true;
 
 function currentDist(t) {
   if (t <= ORBIT_DURATION) return OVERVIEW_DIST;
@@ -386,7 +392,18 @@ function frame(now){
   const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
 
-  if (!paused) updateCycle(dt);
+  if (!paused) {
+    updateCycle(dt);
+    dirty = true; // 再生中は毎フレーム状態が変化するので常に描画する
+  }
+
+  requestAnimationFrame(frame);
+
+  // 一時停止中でdirtyが立っていなければ、重いカメラ計算・raymarch描画・
+  // HUD更新をまるごとスキップして計算負荷を落とす。
+  if (!dirty) return;
+  dirty = false;
+
   const dist = currentDist(cycleT);
   // 自動首振り(基準の上方向まわりの一定回転)とドラッグ(クォータニオンで
   // 累積・制限なし)を合成する。
@@ -407,8 +424,6 @@ function frame(now){
   // (53bit)がボトルネックにならないようにしている。
   const p0Split = splitVec3(target.p0);
   const camOffset = vsub(cam.P, target.p0);
-
-  requestAnimationFrame(frame);
 
   // カラーバッファをクリア
   gl.clear(gl.COLOR_BUFFER_BIT);
@@ -534,6 +549,7 @@ function togglePause() {
   pauseBtn.textContent = paused ? "▶" : "⏸";
   pauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
   pauseBtn.setAttribute("aria-label", paused ? "再生(スペースキー)" : "一時停止(スペースキー)");
+  dirty = true; // HUDの「一時停止中」表示を即座に反映する
   engage();
 }
 
@@ -579,6 +595,7 @@ function cRotate(dx,dy) {
   const yawQ = Quatarnion.rotation(-dx * Math.PI, lastCamU[0], lastCamU[1], lastCamU[2]);
   const pitchQ = Quatarnion.rotation(dy * Math.PI, lastCamR[0], lastCamR[1], lastCamR[2]);
   dragQuat = normalizeQuat(pitchQ.times(yawQ.times(dragQuat)));
+  dirty = true; // 一時停止中でも見回した分は再描画する
 };
 
 // ホイールでズームサイクルの進行速度を上げ下げする。
