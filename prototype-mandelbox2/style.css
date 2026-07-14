@@ -7,6 +7,17 @@
 canvas{
   border: 1px solid black;
 }
+#canvasWrap{
+  position: relative;
+  display: inline-block;
+}
+#fadeOverlay{
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
 #recIcon{
   color :red;
 }
