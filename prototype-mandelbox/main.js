@@ -18,19 +18,25 @@
 //     入っている。つまり計算コストはズーム段数に対して定数(README「計算
 //     コストがズーム段数に依存しない理由」参照)。
 //  2. 「常に一定」なのは計算コストの方で、実際に無限に見えるわけではない。
-//     float32 は目標点 p0(O(1) の座標)から見て相対 1e-6〜1e-7 程度離れた
-//     オフセットまでしか安定に解決できない(Node.js で ULP を実測——
-//     precision.js 参照)。このプロトタイプは「ズーム開始距離(数単位)から
-//     この限界(数万分の一)まで対数的に一定速度で潜り、限界に達したら
-//     フェードで次の1点へ移る」を延々と繰り返すことで、有限の精度で
-//     「無限に潜り続けている」体感を作る(2重精度や摂動法などの追加コスト
-//     は一切使わない——README「なぜ二重精度が要らないか」参照)。
+//     WebGL2のGLSLにはハードウェアの倍精度が無いため、float32のペア(hi/lo)
+//     で倍精度相当を再現する df64(double-float)演算を GPU 側に実装した
+//     (README「df64(double-float)による倍精度」参照)。素の float32 は
+//     目標点 p0(O(1) の座標)から見て相対 1e-6〜1e-7 程度離れたオフセット
+//     までしか安定に解決できないのに対し、df64 では Node.js での実測で
+//     ~1e-12〜1e-14 付近まで構造を保って解決できる。それでも有限の精度
+//     である以上いつか限界には達するため、「ズーム開始距離(数単位)から
+//     この限界まで対数的に一定速度で潜り、限界に達したらフェードで次の
+//     1点へ移る」を延々と繰り返すことで、有限の精度で「無限に潜り続けて
+//     いる」体感を作る。
 //  3. カメラは常に固定した1本の直線(p0 を通る視線)の上だけを、指数的に
 //     縮む距離 dist(t) で前後するだけ(横に振れたりオービットしたりは
-//     しない)。これにより ro = p0 - viewDir*dist(t) の唯一の入力
-//     dist(t) だけが浮動小数点精度の危険因子になり、扱いが単純になる。
-//     ドラッグによる見回しは、この基準方向に対する小さな yaw/pitch の
-//     上乗せとして加える(移動そのものには影響しない)。
+//     しない)。ro = p0 + camOffset(t) の合成(dist(t) を含む)は、
+//     p0 を df64 の (hi,lo) のまま GPU に渡し、tiny な camOffset をそこへ
+//     df64 の補正加算で足し込むことで行う——CPU側で先に倍精度の p0 と
+//     dist を1つの float64 に潰してしまうと、そちらの精度(53bit)が
+//     ボトルネックになってしまうため。ドラッグによる見回しは、この基準
+//     方向に対する小さな yaw/pitch の上乗せとして加える(移動そのものには
+//     影響しない)。
 //  4. サイクルは「広い視点で全体を見せる(overview)→同じ1点へ対数的に
 //     潜る(dive)→精度限界でフェードし次の点を JS 側で探して差し替える
 //     (fade)」の3段。overview があることで「今どこにいるか」の全体像を
@@ -82,21 +88,52 @@ const CONFIG = {
 
   // --- レイマーチ ---
   FOCAL: 0.62,
-  MAX_STEPS: 180,
+  MAX_STEPS: 220,
   STEP_SAFETY: 0.93,
-  SURF_EPS_FACTOR: 0.0012, // 実効イプシロン = uMaxDist * この係数(ズーム段数に依らずスケール不変)
-  SURF_EPS_MIN: 1e-8,
+  // 表面判定のイプシロンは「カメラ距離全体に比例した定数」ではなく、
+  // レイの進行距離 t × 1ピクセルが投影される角度サイズ、で決める
+  // (README「遠景でのっぺりする問題」参照)。SURF_EPS_PIXEL_MULT は
+  // 1ピクセル分のイプシロンに掛ける安全率。
+  SURF_EPS_PIXEL_MULT: 1.5,
+  SURF_EPS_MIN: 1e-13, // DIST_MIN(下記)より十分小さい絶対下限
   FAR_MULT: 6.0, // uMaxDist = 現在のカメラ距離 * FAR_MULT
   FOG_K: 1.5,
 
+  // --- 配色・ライティング(参考: https://hausdorff-dimension.netlify.app/mandelbox.html の mandelbox.frag) ---
+  // 参考サイトの incCenter(軸±2)・incRadius(2.0)は、参考サイトの
+  // カメラ距離(11)に対する比率(≒0.18)をこちらの OVERVIEW_DIST に
+  // 当てはめてスケールしたもの。
+  GLOW_RADIUS: 2.4,
+  BRIGHTNESS: 1.0, // ガンマ補正前の線形色に掛ける明るさ倍率(色相・彩度は不変)
+
   // --- ズームサイクル ---
   OVERVIEW_DIST: 13.0, // 全体を見渡す距離(BOUND_RADIUSの実測値から逆算、README参照)
-  DIST_MIN: 2.5e-5, // float32で安定に解決できる下限(precision.js の実測に基づく。README参照)
+  // df64の中心レイ単体(オフセットを直接p0へ補正加算するケース)は理論上
+  // ~1e-12〜1e-14あたりまで安定に解決できるが、画面全域(中心からズレた
+  // レイ)まで含めて実測すると、pixel-projected epsilon下での収束は
+  // それよりずっと手前、dist が旧DIST_MIN(2.5e-5)を下回るあたりから
+  // 徐々に(悪化ではなく)まばらになり始める(headless Chromiumでの実描画と
+  // Node.js上の同一ロジック再現の両方で確認、README「df64(double-float)
+  // による倍精度」参照)。df64・pickTargetの精度・pixel-projected epsilon
+  // いずれも旧実装より大幅に改善しているため、同程度の潜る深さでも「最後は
+  // 痩せて消える」ことは無くなったが、「開始から終了まで画面全体で高精細を
+  // 保つ」ことを理論上の最大深度より優先し、旧実装とほぼ同じ深さのまま
+  // 据え置いた。
+  DIST_MIN: 5e-5,
   ORBIT_DURATION: 4.0, // 秒。overview フェーズの長さ
-  DIVE_DURATION: 24.0, // 秒。dive フェーズの長さ(この間 dist は指数的にDIST_MINまで縮む)
+  DIVE_DURATION: 23.0, // 秒。dive フェーズの長さ(この間 dist は指数的にDIST_MINまで縮む)。
   FADE_DURATION: 1.1, // 秒。次の1点へ切り替える際のフェード
 
-  AUTO_YAW_SPEED: 0.045, // rad/秒。サイクル全体を通した緩やかな自動首振り
+  // rad/秒。サイクル全体を通した緩やかな自動首振り。
+  // pixel-projected epsilon(README「遠景でのっぺりする問題」参照)導入前は
+  // イプシロンが粗く、多少カメラの向きがp0からズレても周辺の粗い構造に
+  // 「引っかかって」何かしら映っていたが、精密なイプシロンでは首振りが
+  // 累積してp0の方向から大きくズレると、dive後半でレイが本当に何にも
+  // 当たらなくなり画面が真っ黒になる(headless Chromiumでの実描画と
+  // Node.js上の同一ロジック再現の両方でyaw=90°付近で完全に0hitになる
+  // ことを確認)。DIVE_DURATION全体を通した首振りが約15°を超えないよう
+  // 旧値(0.045)から引き下げた。
+  AUTO_YAW_SPEED: 0.006,
   WHEEL_SPEED_MULT_RANGE: [0.35, 3.2],
   WHEEL_SENSITIVITY: 0.0011,
   DRAG_YAW_SENSITIVITY: 0.0042,
@@ -160,14 +197,36 @@ function vcross(a, b) {
   ];
 }
 function vadd(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
 function vscale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
 
+// JSの倍精度(number)を、GPUへdf64として渡すためのfloat32ペア(hi,lo)に
+// 分割する(README「df64(double-float)による倍精度」参照)。
+function splitFloat(x) {
+  const hi = Math.fround(x);
+  const lo = Math.fround(x - hi);
+  return [hi, lo];
+}
+function splitVec3(v) {
+  const sx = splitFloat(v[0]), sy = splitFloat(v[1]), sz = splitFloat(v[2]);
+  return { hi: [sx[0], sy[0], sz[0]], lo: [sx[1], sy[1], sz[1]] };
+}
+
+// ヒットしきい値は DIST_MIN(GPU側でdf64により潜れる下限)より十分小さく
+// 締めておく必要がある。ここが緩いと、p0 自身が isosurface からズレた
+// 「だいたい表面上」の点になり、そのズレ(旧しきい値1e-5では残差~4e-6
+// 程度)が新しい DIST_MIN=1e-10 のスケールでは無視できない誤差になって、
+// 深く潜るほど全く違う構造に着地したり完全に外れたりする(実機デバッグで
+// 確認、README「df64(double-float)による倍精度」参照)。JS側は倍精度
+// なので、しきい値を締めても収束に必要な反復回数はわずかしか増えない
+// (実測で1e-5→1e-13でも+30ステップ程度)。
+const PICK_TARGET_HIT_EPS = 1e-13;
 function jsRaymarch(ro, rd, maxDist) {
   let t = 0;
-  for (let i = 0; i < 400; i++) {
+  for (let i = 0; i < 800; i++) {
     const p = [ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t];
     const d = jsDE(p[0], p[1], p[2]);
-    if (d < 1e-5 * Math.max(1, t)) return { hit: true, t, p };
+    if (d < PICK_TARGET_HIT_EPS) return { hit: true, t, p };
     t += d;
     if (t > maxDist) return { hit: false, t };
   }
@@ -226,11 +285,13 @@ precision highp float;
 out vec4 outColor;
 
 uniform vec2 uResolution;
-uniform vec3 uP;
+uniform vec3 uP0_hi; // 潜る先の1点 p0 の上位(float32丸め)成分
+uniform vec3 uP0_lo; // p0 の残差(下位)成分。uP0_hiと合わせてdf64のp0を成す
+uniform vec3 uCamOffset; // カメラ位置 - p0(README「df64(double-float)による倍精度」参照)
 uniform vec3 uF;
 uniform vec3 uR;
 uniform vec3 uU;
-uniform float uMaxDist; // 現在のカメラ〜目標点距離に比例。イプシロン・フォグをこれ基準にしてスケール不変にする
+uniform float uMaxDist; // 現在のカメラ〜目標点距離に比例。フォグをこれ基準にしてスケール不変にする
 
 const float SCALE   = ${f(CONFIG.SCALE)};
 const float MINR2   = ${f(CONFIG.MINR2)};
@@ -240,100 +301,253 @@ const int   ITER    = ${Math.round(CONFIG.ITER)};
 const float FOCAL   = ${f(CONFIG.FOCAL)};
 const int   MAX_STEPS = ${Math.round(CONFIG.MAX_STEPS)};
 const float STEP_SAFETY = ${f(CONFIG.STEP_SAFETY)};
-const float SURF_EPS_FACTOR = ${f(CONFIG.SURF_EPS_FACTOR)};
+const float SURF_EPS_PIXEL_MULT = ${f(CONFIG.SURF_EPS_PIXEL_MULT)};
 const float SURF_EPS_MIN = ${f(CONFIG.SURF_EPS_MIN)};
 const float FOG_K = ${f(CONFIG.FOG_K)};
 
-vec3 skyColor(vec2 uv) {
-  vec3 top = vec3(0.02, 0.018, 0.045);
-  vec3 bot = vec3(0.045, 0.03, 0.06);
-  return mix(bot, top, clamp(uv.y * 0.5 + 0.5, 0.0, 1.0));
+// 参考サイト(mandelbox.frag)のマテリアル定数をそのまま移植。
+const vec3  BASE_COLOR = vec3(0.454, 0.301, 0.211); // マテリアル BROWN
+const vec3  GLOW_COLOR = vec3(1.000, 0.501, 0.200); // 白熱光/グローの色
+const vec3  LIGHT_DIR  = normalize(vec3(2.0, 1.0, 1.0));
+const float AMBIENT_INTENSITY = 0.7;
+const float DIFFUSE_INTENSITY = 1.1;
+const float INC_INTENSITY = 1.5;
+const float GLOW_RADIUS = ${f(CONFIG.GLOW_RADIUS)}; // incCenter・incRadius 兼用(参考サイトでは両方 2.0)
+const float GROW_INTENSITY = 1.0;
+// ガンマ補正(pow 2.2)にかける前の線形色を一律に底上げする係数。
+// 全チャンネルへ同じ倍率をかけるだけなので色相・彩度の比率は変わらず、
+// 明るさだけが持ち上がる(色味は変えずに明るくする)。
+const float BRIGHTNESS = ${f(CONFIG.BRIGHTNESS)};
+
+vec3 skyColor() {
+  return vec3(0.0); // 参考サイトの背景(マテリアル SAIHATE)は完全な黒
+}
+
+// ----------------------------------------------------------------------------
+// df64: float32 の (hi, lo) ペアで倍精度相当を再現する「double-float」演算
+// (Dekker/Knuth の2Sum・2Prodアルゴリズムをfloat32の24bit仮数部向けに
+// 実装したもの)。WebGL2のGLSLにハードウェアのdouble型が無いため、座標
+// だけをこの表現で持ち回ることで、float32単体では相対オフセット~1e-6で
+// 崩れる精度を~1e-12〜1e-14付近まで伸ばす(README「df64(double-float)に
+// よる倍精度」参照、Node.js上で真の倍精度と比較して実測)。
+// ----------------------------------------------------------------------------
+vec2 twoSum(float a, float b) {
+  float s = a + b;
+  float v = s - a;
+  float e = (a - (s - v)) + (b - v);
+  return vec2(s, e);
+}
+vec2 quickTwoSum(float a, float b) {
+  float s = a + b;
+  float e = b - (s - a);
+  return vec2(s, e);
+}
+void split32(float a, out float hi, out float lo) {
+  float c = 4097.0 * a; // 2^12+1: float32(24bit仮数部)向けのVeltkamp分割定数
+  hi = c - (c - a);
+  lo = a - hi;
+}
+vec2 twoProd(float a, float b) {
+  float p = a * b;
+  float aHi, aLo, bHi, bLo;
+  split32(a, aHi, aLo);
+  split32(b, bHi, bLo);
+  float e = ((aHi * bHi - p) + aHi * bLo + aLo * bHi) + aLo * bLo;
+  return vec2(p, e);
+}
+vec2 dfAdd(vec2 a, vec2 b) {
+  vec2 s = twoSum(a.x, b.x);
+  s.y += a.y + b.y;
+  return quickTwoSum(s.x, s.y);
+}
+vec2 dfAddF(vec2 a, float b) {
+  vec2 s = twoSum(a.x, b);
+  s.y += a.y;
+  return quickTwoSum(s.x, s.y);
+}
+vec2 dfSub(vec2 a, vec2 b) { return dfAdd(a, vec2(-b.x, -b.y)); }
+vec2 dfMul(vec2 a, vec2 b) {
+  vec2 p = twoProd(a.x, b.x);
+  p.y += a.x * b.y + a.y * b.x;
+  return quickTwoSum(p.x, p.y);
+}
+vec2 dfMulF(vec2 a, float b) {
+  vec2 p = twoProd(a.x, b);
+  p.y += a.y * b;
+  return quickTwoSum(p.x, p.y);
+}
+vec2 dfDiv(vec2 a, vec2 b) {
+  float q1 = a.x / b.x;
+  vec2 r = dfSub(a, dfMulF(b, q1));
+  float q2 = r.x / b.x;
+  r = dfSub(r, dfMulF(b, q2));
+  float q3 = r.x / b.x;
+  vec2 q = quickTwoSum(q1, q2);
+  return dfAddF(q, q3);
+}
+vec2 dfFromFloat(float a) { return vec2(a, 0.0); }
+float dfToFloat(vec2 a) { return a.x + a.y; }
+
+// vec3を成分ごとにdf64で保持する「倍精度座標」。
+struct DF3 { vec3 hi; vec3 lo; };
+
+vec3 df3ToVec3(DF3 a) { return a.hi + a.lo; }
+
+DF3 df3AddVec3(DF3 a, vec3 b) {
+  vec2 rx = dfAddF(vec2(a.hi.x, a.lo.x), b.x);
+  vec2 ry = dfAddF(vec2(a.hi.y, a.lo.y), b.y);
+  vec2 rz = dfAddF(vec2(a.hi.z, a.lo.z), b.z);
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+DF3 df3Add(DF3 a, DF3 b) {
+  vec2 rx = dfAdd(vec2(a.hi.x, a.lo.x), vec2(b.hi.x, b.lo.x));
+  vec2 ry = dfAdd(vec2(a.hi.y, a.lo.y), vec2(b.hi.y, b.lo.y));
+  vec2 rz = dfAdd(vec2(a.hi.z, a.lo.z), vec2(b.hi.z, b.lo.z));
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+DF3 df3Sub(DF3 a, DF3 b) { return df3Add(a, DF3(-b.hi, -b.lo)); }
+DF3 df3MulF(DF3 a, float s) {
+  vec2 rx = dfMulF(vec2(a.hi.x, a.lo.x), s);
+  vec2 ry = dfMulF(vec2(a.hi.y, a.lo.y), s);
+  vec2 rz = dfMulF(vec2(a.hi.z, a.lo.z), s);
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+DF3 df3MulDF(DF3 a, vec2 s) {
+  vec2 rx = dfMul(vec2(a.hi.x, a.lo.x), s);
+  vec2 ry = dfMul(vec2(a.hi.y, a.lo.y), s);
+  vec2 rz = dfMul(vec2(a.hi.z, a.lo.z), s);
+  return DF3(vec3(rx.x, ry.x, rz.x), vec3(rx.y, ry.y, rz.y));
+}
+vec2 df3Dot(DF3 a, DF3 b) {
+  vec2 x = dfMul(vec2(a.hi.x, a.lo.x), vec2(b.hi.x, b.lo.x));
+  vec2 y = dfMul(vec2(a.hi.y, a.lo.y), vec2(b.hi.y, b.lo.y));
+  vec2 z = dfMul(vec2(a.hi.z, a.lo.z), vec2(b.hi.z, b.lo.z));
+  return dfAdd(dfAdd(x, y), z);
+}
+// box-foldのclamp: 判定はhi成分だけで行う(fold境界ぎりぎりの際どいケース
+// でだけ生じうる誤差は無視できるほど稀——README参照)。範囲内ならlo成分も
+// そのまま保持し、範囲外に丸めた成分だけlo=0にする。
+DF3 df3ClampFold(DF3 a, float lo, float hi) {
+  vec3 rHi = clamp(a.hi, lo, hi);
+  vec3 inRange = step(vec3(lo), a.hi) * step(a.hi, vec3(hi));
+  return DF3(rHi, a.lo * inRange);
 }
 
 // マンデルボックスの距離推定(DE)。Rrrola型の box-fold + ball-fold +
 // scale+translate を ITER 回繰り返す(README「マンデルボックスのDE」参照)。
-// trap には反復中に到達した最小の |z|^2 を記録し、着色にだけ使う——
-// この trap はどのズーム段数でも「同じ ITER 回の反復のうちどこで
-// 折り畳みが強く効いたか」を表す量なので、対数スケールで潜っても同じ
-// ような色の帯が繰り返し現れ、自己相似性を色でも裏付ける(README参照)。
-float mapDE(vec3 p, out float trap) {
-  vec3 z = p;
+// 座標 z・p だけを df64 で保持し、dr・SCALE・MINR2・FIXEDR2・FOLD は
+// float32 のままでよい(精度の危険因子は座標そのものであって dr の成長
+// ではないことをNode.js上のシミュレーションで確認した——README参照)。
+float mapDE(DF3 p) {
+  DF3 z = p;
   float dr = 1.0;
-  trap = 1e9;
   for (int n = 0; n < ITER; n++) {
-    z = clamp(z, -FOLD, FOLD) * 2.0 - z;
-    float r2 = dot(z, z);
+    z = df3Sub(df3MulF(df3ClampFold(z, -FOLD, FOLD), 2.0), z);
+    vec2 r2df = df3Dot(z, z);
+    float r2 = dfToFloat(r2df);
     if (r2 < MINR2) {
       float t = FIXEDR2 / MINR2;
-      z *= t; dr *= t;
+      z = df3MulF(z, t);
+      dr *= t;
     } else if (r2 < FIXEDR2) {
-      float t = FIXEDR2 / r2;
-      z *= t; dr *= t;
+      vec2 t = dfDiv(dfFromFloat(FIXEDR2), r2df);
+      z = df3MulDF(z, t);
+      dr *= dfToFloat(t);
     }
-    z = z * SCALE + p;
+    z = df3Add(df3MulF(z, SCALE), p);
     dr = dr * abs(SCALE) + 1.0;
-    trap = min(trap, dot(z, z));
   }
-  return length(z) / abs(dr);
+  vec3 zf = df3ToVec3(z);
+  return length(zf) / abs(dr);
 }
 
-vec3 calcNormal(vec3 p, float eps) {
+vec3 calcNormal(DF3 p, float eps) {
   const vec2 k = vec2(1.0, -1.0);
-  float t;
   return normalize(
-    k.xyy * mapDE(p + k.xyy * eps, t) +
-    k.yyx * mapDE(p + k.yyx * eps, t) +
-    k.yxy * mapDE(p + k.yxy * eps, t) +
-    k.xxx * mapDE(p + k.xxx * eps, t)
+    k.xyy * mapDE(df3AddVec3(p, k.xyy * eps)) +
+    k.yyx * mapDE(df3AddVec3(p, k.yyx * eps)) +
+    k.yxy * mapDE(df3AddVec3(p, k.yxy * eps)) +
+    k.xxx * mapDE(df3AddVec3(p, k.xxx * eps))
   );
 }
 
-vec3 shade(vec3 n, vec3 viewDir, float trap) {
-  vec3 lightDir = normalize(vec3(0.5, 0.8, 0.35));
-  float diff = max(dot(n, lightDir), 0.0);
-  float amb = 0.13;
-  // trap(最小|z|^2到達値)を可視域へ写像し、深藍〜暖色の色帯として使う。
-  float trapT = clamp(sqrt(max(trap, 0.0)) / 1.15, 0.0, 1.0);
-  vec3 colA = vec3(0.09, 0.11, 0.20);
-  vec3 colB = vec3(0.95, 0.76, 0.46);
-  vec3 base = mix(colA, colB, trapT);
-  float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
-  vec3 col = base * (amb + 0.95 * diff) + fres * 0.16 * vec3(0.55, 0.78, 1.0);
-  return col;
+// 参考サイトの incandescenceFunc: 座標軸±GLOW_RADIUS上の6点を中心とした
+// 白熱光源。反復深度に関係なく「ワールド座標のどこにいるか」だけで灯る点
+// なので、同じ1点に潜り続けるこのプロトタイプでもサイクルごとに灯る/
+// 灯らないの違いが出る。
+float glowPoints(vec3 p) {
+  float amt = 0.0;
+  vec3 ax = vec3(GLOW_RADIUS, 0.0, 0.0);
+  amt += pow(max(1.0 - length(p - ax) / GLOW_RADIUS, 0.0), 2.0);
+  amt += pow(max(1.0 - length(p + ax) / GLOW_RADIUS, 0.0), 2.0);
+  ax = vec3(0.0, GLOW_RADIUS, 0.0);
+  amt += pow(max(1.0 - length(p - ax) / GLOW_RADIUS, 0.0), 2.0);
+  amt += pow(max(1.0 - length(p + ax) / GLOW_RADIUS, 0.0), 2.0);
+  ax = vec3(0.0, 0.0, GLOW_RADIUS);
+  amt += pow(max(1.0 - length(p - ax) / GLOW_RADIUS, 0.0), 2.0);
+  amt += pow(max(1.0 - length(p + ax) / GLOW_RADIUS, 0.0), 2.0);
+  return amt;
+}
+
+// 参考サイトの ambientFunc + diffuseFunc + incandescenceFunc + growFunc を
+// この順で加算合成(スペキュラ・シャドウ・大域照明・反射は参考サイトでも
+// 実効的に寄与がないため省略)。iterate はレイマーチで消費したステップ数の
+// 割合(参考サイトの ray.iterate)で、細部ほど1に近づきグローが強く乗る。
+vec3 shade(vec3 p, vec3 n, float iterate) {
+  vec3 col = AMBIENT_INTENSITY * BASE_COLOR;
+  float diff = max(dot(n, LIGHT_DIR), 0.0);
+  col = clamp(col + DIFFUSE_INTENSITY * diff * BASE_COLOR, 0.0, 1.0);
+  col = clamp(col + INC_INTENSITY * GLOW_COLOR * glowPoints(p), 0.0, 1.0);
+  float growCoef = smoothstep(0.0, 0.95, iterate);
+  col += GROW_INTENSITY * growCoef * GLOW_COLOR;
+  return col * BRIGHTNESS;
 }
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
-  vec3 ro = uP;
   vec3 rd = normalize(uv.x * uR + uv.y * uU + FOCAL * uF);
+  DF3 p0 = DF3(uP0_hi, uP0_lo);
+  // ro = p0 + camOffset をここで一度だけ補正加算しておく。camOffset自体は
+  // 通常のfloat32(その大きさ=dist基準の相対精度で十分)だが、これを
+  // 先にuCamOffset + rd*tとして素のfloat32加算で合成してからp0に足すと、
+  // p0への合成で守ったはずの精度が「dist基準のfloat32丸め」で先に失われて
+  // しまう(cam方向とtの打ち消し合いがdist未満の桁を捨ててしまうため)。
+  // rd*t は毎ステップ ro(既にdf64で確定済み)へ直接、補正加算で足し込む。
+  DF3 ro = df3AddVec3(p0, uCamOffset);
 
-  float surfEps = max(SURF_EPS_MIN, uMaxDist * SURF_EPS_FACTOR);
+  // 1ピクセルが投影される角度サイズ(ラジアン相当)。表面判定のイプシロンを
+  // これに比例させることで、画面上どの距離でも「そのピクセルで解像できる
+  // 限界」まで細部を残す(README「遠景でのっぺりする問題」参照)。
+  float pixelAngle = 1.0 / (FOCAL * uResolution.y);
 
   float t = 0.0;
   bool hit = false;
-  float trapAtHit = 0.0;
+  float iterate = 1.0;
+  float hitEps = SURF_EPS_MIN;
   for (int i = 0; i < MAX_STEPS; i++) {
-    vec3 p = ro + rd * t;
-    float trapDummy;
-    float d = mapDE(p, trapDummy);
-    if (d < surfEps) { hit = true; trapAtHit = trapDummy; break; }
+    float surfEps = max(SURF_EPS_MIN, t * pixelAngle * SURF_EPS_PIXEL_MULT);
+    DF3 p = df3AddVec3(ro, rd * t);
+    float d = mapDE(p);
+    if (d < surfEps) { hit = true; iterate = float(i) / float(MAX_STEPS); hitEps = surfEps; break; }
     t += d * STEP_SAFETY;
     if (t > uMaxDist) break;
   }
 
-  vec3 fogColor = skyColor(uv);
+  vec3 fogColor = skyColor();
   vec3 col;
   if (hit) {
-    vec3 p = ro + rd * t;
-    vec3 n = calcNormal(p, surfEps * 0.5);
-    col = shade(n, -rd, trapAtHit);
+    DF3 p = df3AddVec3(ro, rd * t);
+    vec3 n = calcNormal(p, hitEps * 0.5);
+    col = shade(df3ToVec3(p), n, iterate);
   } else {
     col = fogColor;
   }
   float relT = t / uMaxDist;
   float fogAmt = 1.0 - exp(-relT * FOG_K);
   col = mix(col, fogColor, clamp(fogAmt, 0.0, 1.0));
-  col = pow(clamp(col, 0.0, 1.0), vec3(0.4545));
+  // 参考サイトの gammaFunc は pow(col, 2.2)(逆数ではない)で、暗部を
+  // 強く締めてコントラストを上げる独特の実装。見た目を合わせるため踏襲。
+  col = pow(clamp(col, 0.0, 1.0), vec3(2.2));
   outColor = vec4(col, 1.0);
 }`;
 
@@ -369,7 +583,9 @@ function createProgram(vsSource, fsSource) {
 const program = createProgram(VERT_SRC, FRAG_SRC);
 const uLoc = {
   resolution: gl.getUniformLocation(program, "uResolution"),
-  P: gl.getUniformLocation(program, "uP"),
+  P0hi: gl.getUniformLocation(program, "uP0_hi"),
+  P0lo: gl.getUniformLocation(program, "uP0_lo"),
+  camOffset: gl.getUniformLocation(program, "uCamOffset"),
   F: gl.getUniformLocation(program, "uF"),
   R: gl.getUniformLocation(program, "uR"),
   U: gl.getUniformLocation(program, "uU"),
@@ -546,11 +762,20 @@ function frame(now) {
     const pitch = dragPitch;
     const cam = buildCameraFrame(target.p0, target.viewDir, dist, yaw, pitch);
     const maxDist = dist * CONFIG.FAR_MULT;
+    // p0はdf64の(hi,lo)としてGPUへ渡し、camOffset(=カメラ位置-p0、
+    // JSの倍精度でも常にdistのオーダーでしか無いので精度は失われない)は
+    // 通常のfloat32で渡す。GPU側でこの2つをdf64の補正加算で合成することで、
+    // CPU側の倍精度(53bit)がボトルネックにならないようにしている
+    // (README「df64(double-float)による倍精度」参照)。
+    const p0Split = splitVec3(target.p0);
+    const camOffset = vsub(cam.P, target.p0);
 
     gl.useProgram(program);
     gl.bindVertexArray(emptyVAO);
     gl.uniform2f(uLoc.resolution, fullW, fullH);
-    gl.uniform3fv(uLoc.P, cam.P);
+    gl.uniform3fv(uLoc.P0hi, p0Split.hi);
+    gl.uniform3fv(uLoc.P0lo, p0Split.lo);
+    gl.uniform3fv(uLoc.camOffset, camOffset);
     gl.uniform3fv(uLoc.F, cam.F);
     gl.uniform3fv(uLoc.R, cam.R);
     gl.uniform3fv(uLoc.U, cam.U);
