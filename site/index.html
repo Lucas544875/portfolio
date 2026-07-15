@@ -6,9 +6,36 @@
 <title>髙柳海斗 / Portfolio</title>
 <link rel="stylesheet" href="/src/style.css" />
 <link rel="stylesheet" href="/src/components/cover-flow.css" />
+<style>
+  /* style.cssはJSモジュール経由で読み込まれ適用が遅れる(JSがstyleを注入する
+     までノースタイルの白背景が一瞬見える)。初回ペイントの時点で背景と
+     ローディング画面だけは確実に暗色になるよう、最小限を先読みでインライン化
+     しておく(内容はstyle.cssの該当ルールと重複するが、後から読み込まれる
+     本CSSが上書きしても見た目は変わらない)。 */
+  html, body { margin: 0; padding: 0; background: #031014; }
+  #loadingScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #031014;
+  }
+</style>
 </head>
 <body>
 <canvas id="gl-canvas"></canvas>
+
+<div id="loadingScreen" class="loading-screen">
+  <div class="loading-inner">
+    <div class="loading-spinner" aria-hidden="true"></div>
+    <div id="loadingText" class="loading-text">読み込み中…</div>
+    <div class="loading-bar-track">
+      <div id="loadingFill" class="loading-bar-fill"></div>
+    </div>
+  </div>
+</div>
 
 <nav class="site-nav">
   <a href="/works/">Works</a>

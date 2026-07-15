@@ -8,14 +8,60 @@ import { initCoverFlowAuto } from './components/cover-flow-auto.js';
 const canvas = document.getElementById('gl-canvas');
 const renderer = new SharedGLRenderer(canvas);
 
+const loadingScreen = document.getElementById('loadingScreen');
+const loadingText = document.getElementById('loadingText');
+const loadingFill = document.getElementById('loadingFill');
+
+// mandelbox.js(サブページ)と同じ理由: 各ブロックのcreateResources内の
+// gl.compileShader/linkProgramは同期処理でメインスレッドをブロックするため、
+// 進捗イベントを取れない。ステージごとにnextPaint()を挟んで、更新した
+// テキスト/バーが次のブロッキング処理の前に必ず1度は画面に反映されるようにする。
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+function setLoadingStage(text, progress) {
+  if (loadingText) loadingText.textContent = text;
+  if (loadingFill) loadingFill.style.width = `${progress}%`;
+}
+
+function hideLoadingScreen() {
+  if (!loadingScreen) return;
+  loadingScreen.classList.add('loading-done');
+  setTimeout(() => loadingScreen.remove(), 600);
+}
+
 initCoverFlowAuto(document.getElementById('works-c'));
 
 if (renderer.supported) {
-  renderer.register(createHeroBlock(document.getElementById('hero')));
-  renderer.register(createMandelboxBlock(document.getElementById('works-a')));
-  renderer.register(createRainWindowBlock(document.getElementById('works-b')));
+  (async () => {
+    setLoadingStage('WebGLを初期化中…', 10);
+    await nextPaint();
 
-  renderer.start();
+    setLoadingStage('シェーダーをコンパイル中…', 35);
+    await nextPaint();
+    renderer.register(createHeroBlock(document.getElementById('hero')));
+
+    setLoadingStage('シェーダーをコンパイル中…', 60);
+    await nextPaint();
+    renderer.register(createMandelboxBlock(document.getElementById('works-a')));
+
+    setLoadingStage('シェーダーをコンパイル中…', 85);
+    await nextPaint();
+    renderer.register(createRainWindowBlock(document.getElementById('works-b')));
+
+    setLoadingStage('初回描画中…', 96);
+    await nextPaint();
+
+    renderer.start();
+
+    await nextPaint();
+    setLoadingStage('完了', 100);
+    hideLoadingScreen();
+  })();
 } else {
+  hideLoadingScreen();
   console.warn('WebGL2 not supported: falling back to static background (see .no-webgl in style.css).');
 }
