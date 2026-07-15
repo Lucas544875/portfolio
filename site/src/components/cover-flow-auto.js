@@ -3,7 +3,7 @@
 // リンクになっている前提)。詳細は cover-flow.css 冒頭のコメント参照。
 import { applyCoverFlowLayout } from './cover-flow-core.js';
 
-const AUTOPLAY_INTERVAL_MS = 2800;
+const AUTOPLAY_INTERVAL_MS = 2000;
 
 export function initCoverFlowAuto(root) {
   const items = Array.from(root.querySelectorAll('.cf-track .cf-item'));
