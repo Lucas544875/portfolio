@@ -35,10 +35,23 @@ export function initCoverFlow(root) {
     layout();
   }
 
+  // 中央にあるサムネイルは「開く」リンクと同じ役割を持たせる(クリックで
+  // 直接リンク先へ遷移)。中央以外のサムネイルは従来通りクリックで中央へ送る。
+  function selectOrOpen(i) {
+    if (i === current) {
+      linkEl.click();
+      return;
+    }
+    goTo(i);
+  }
+
   items.forEach((item, i) => {
-    item.addEventListener('click', () => goTo(i));
+    item.addEventListener('click', () => selectOrOpen(i));
     item.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') goTo(i);
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectOrOpen(i);
+      }
     });
   });
 
