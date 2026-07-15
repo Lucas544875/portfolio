@@ -4,10 +4,39 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>髙柳海斗 / Portfolio / フラクタルレンダラー</title>
+<style>
+  /* mandelbox-full.cssはJSモジュール経由で読み込まれ適用が遅れる(特に
+     vite devではJSがstyleを注入するまで、本番でも外部CSSの取得完了まで
+     ノースタイルの白背景が一瞬見える)。初回ペイントの時点で背景と
+     ローディング画面だけは確実に暗色になるよう、最小限を先読みで
+     インライン化しておく(内容はmandelbox-full.cssの該当ルールと重複
+     するが、後から読み込まれる本CSSが上書きしても見た目は変わらない)。 */
+  html, body { margin: 0; padding: 0; background: #04030a; }
+  #loadingScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #04030a;
+  }
+</style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
 <div id="fadeOverlay"></div>
+
+<div id="loadingScreen" class="loading-screen">
+  <div class="loading-inner">
+    <div class="loading-spinner" aria-hidden="true"></div>
+    <div id="loadingText" class="loading-text">読み込み中…</div>
+    <div class="loading-bar-track">
+      <div id="loadingFill" class="loading-bar-fill"></div>
+    </div>
+    <div class="loading-note">初回はシェーダーのコンパイルに数秒〜数十秒かかる場合があります</div>
+  </div>
+</div>
 
 <a class="back-link" href="/#about">&larr; 戻る</a>
 

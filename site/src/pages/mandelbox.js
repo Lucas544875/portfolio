@@ -15,6 +15,8 @@ import { Quatarnion } from '../blocks/mandelbox/quaternion.js';
 
 // global
 let c, cw, ch, gl, fadeOverlay, hint, zoomReadout, zoomBarFill, zoomPhaseEl, pauseBtn;
+let loadingScreen, loadingText, loadingFill;
+let firstFrameRendered = false;
 let mouseflag=false;
 let centorx;
 let centory;
@@ -308,13 +310,41 @@ function updateCycle(dt) {
   if (fadeOverlay) fadeOverlay.style.opacity = fadeAlpha.toFixed(3);
 }
 
+// ロード画面: シェーダのコンパイル(mandelbox-full.fragはdf64の倍精度演算を
+// 含む758行と大きく、特にモバイルGPUでは数秒〜数十秒かかることがある)は
+// gl.compileShader/linkProgramが同期処理でメインスレッドをブロックするため、
+// 進捗イベントを取ることができない。そのため「実際の進捗」ではなく、
+// 初期化のステージ(WebGL初期化→シェーダーコンパイル→バッファ準備→初回描画)
+// ごとにプログレスバーを離散的に進める。各ステージの直前でnextPaint()を
+// 挟むことで、更新したテキスト/バーがブロッキング処理の前に必ず1度は
+// 画面に反映されるようにしている(ブロッキング中もCSSの回転スピナーは
+// transformのみのコンポジタアニメーションなのでメインスレッドが詰まって
+// いても動き続け、フリーズしていない印象を保つ)。
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+function setLoadingStage(text, progress) {
+  if (loadingText) loadingText.textContent = text;
+  if (loadingFill) loadingFill.style.width = `${progress}%`;
+}
+
+function hideLoadingScreen() {
+  if (!loadingScreen) return;
+  loadingScreen.classList.add('loading-done');
+  setTimeout(() => loadingScreen.remove(), 600);
+}
+
 // 初期化。元プロトタイプはクラシックscript(同期実行)なのでwindow.onloadで
 // 安全だったが、ここでは<script type="module">(deferred)経由で読み込まれる
 // ため、DOMContentLoaded〜loadの間にすでにDOMは揃っている。window.onloadを
 // 待つと、対象リソースが無いページではload発火のタイミング次第で
 // ハンドラの登録自体が間に合わない(loadを取りこぼす)ことがあるため、
-// 即時実行に変更した。中身は元プロトタイプと同じ。
-(function init(){
+// 即時実行に変更した。ロード画面のステージングを除き、中身は元プロトタイプ
+// と同じ。
+(async function init(){
   // エレメントを取得
   c = document.getElementById('canvas');
   fadeOverlay = document.getElementById('fadeOverlay');
@@ -323,6 +353,11 @@ function updateCycle(dt) {
   zoomBarFill = document.getElementById('zoomBarFill');
   zoomPhaseEl = document.getElementById('zoomPhase');
   pauseBtn = document.getElementById('pauseBtn');
+  loadingScreen = document.getElementById('loadingScreen');
+  loadingText = document.getElementById('loadingText');
+  loadingFill = document.getElementById('loadingFill');
+
+  setLoadingStage('WebGLを初期化中…', 12);
 
   // WebGL コンテキストを取得
   gl = c.getContext('webgl');
@@ -339,8 +374,15 @@ function updateCycle(dt) {
   pauseBtn.addEventListener('click', togglePause);
   document.addEventListener('keydown', onKeyDown);
 
-  // シェーダのコンパイル
+  await nextPaint();
+  setLoadingStage('シェーダーをコンパイル中…(初回のみ時間がかかります)', 35);
+  await nextPaint();
+
+  // シェーダのコンパイル(ここが同期処理で最も重い)
   let prg = create_program(create_shader(gl.VERTEX_SHADER, vertexShaderSrc), create_shader(gl.FRAGMENT_SHADER, fragmentShaderSrc));
+
+  setLoadingStage('バッファを準備中…', 85);
+  await nextPaint();
 
   //unifoem,atteibute変数の設定
   uniLocation.time = gl.getUniformLocation(prg, 'time');
@@ -380,10 +422,13 @@ function updateCycle(dt) {
   // その他の初期化
   gl.clearColor(0.0, 0.0, 0.0, 1.0);
 
+  setLoadingStage('初回描画中…', 96);
+  await nextPaint();
+
   // ヒントは一定時間操作が無ければ自動的に消す。
   setTimeout(() => { if (!userEngaged) hint.classList.add('faded'); }, 7000);
 
-  // レンダリング
+  // レンダリング(初回フレームの描画完了時にframe()内でロード画面を隠す)
   requestAnimationFrame(frame);
 })();
 
@@ -439,6 +484,12 @@ function frame(now){
   // 描画
   gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
   gl.flush();
+
+  if (!firstFrameRendered) {
+    firstFrameRendered = true;
+    setLoadingStage('完了', 100);
+    hideLoadingScreen();
+  }
 
   updateHUD(dist);
 }
