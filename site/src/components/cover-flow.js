@@ -1,6 +1,6 @@
 // Works一覧サブページ(/works/)専用のインタラクティブなカバーフロー
 // (CSS 3D transformのみ、WebGLは使わない)。詳細は cover-flow.css 冒頭のコメント参照。
-// メインページのworks-bブロックには非インタラクティブな自動再生版
+// メインページのworks-cブロックには非インタラクティブな自動再生版
 // (cover-flow-auto.js)を使う。
 import { applyCoverFlowLayout, MAX_VISIBLE_OFFSET } from './cover-flow-core.js';
 

@@ -1,5 +1,5 @@
 /* 作品カバーフロー。Works一覧サブページ(works/index.html)とメインページの
-   works-bブロックの両方から使う共通コンポーネント。メインのstyle.cssを
+   works-cブロックの両方から使う共通コンポーネント。メインのstyle.cssを
    前提にした追加分。 */
 
 .works-list-page {
@@ -25,7 +25,7 @@
   padding: 2rem 1.25rem;
 }
 
-/* works-bブロック全体を/works/へのリンクにする場合の見た目調整
+/* works-cブロック全体を/works/へのリンクにする場合の見た目調整
    (aタグ自体をflexコンテナ化しているのでリセットが必要)。 */
 .works-embed-link {
   text-decoration: none;

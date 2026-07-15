@@ -1,4 +1,4 @@
-// メインページのworks-bブロック用、非インタラクティブな自動再生カバーフロー。
+// メインページのworks-cブロック用、非インタラクティブな自動再生カバーフロー。
 // 個々の作品へのリンクは持たず、見た目のみ(ブロック全体が/works/への
 // リンクになっている前提)。詳細は cover-flow.css 冒頭のコメント参照。
 import { applyCoverFlowLayout } from './cover-flow-core.js';

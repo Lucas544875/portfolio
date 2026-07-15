@@ -8,12 +8,12 @@ import { initCoverFlowAuto } from './components/cover-flow-auto.js';
 const canvas = document.getElementById('gl-canvas');
 const renderer = new SharedGLRenderer(canvas);
 
-initCoverFlowAuto(document.getElementById('works-b'));
+initCoverFlowAuto(document.getElementById('works-c'));
 
 if (renderer.supported) {
   renderer.register(createHeroBlock(document.getElementById('hero')));
-  renderer.register(createMandelboxBlock(document.getElementById('about')));
-  renderer.register(createRainWindowBlock(document.getElementById('works-a')));
+  renderer.register(createMandelboxBlock(document.getElementById('works-a')));
+  renderer.register(createRainWindowBlock(document.getElementById('works-b')));
 
   renderer.start();
 } else {
