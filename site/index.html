@@ -50,8 +50,7 @@
       このブロック全体が/works/(Works一覧サブページ)へのリンク。
       カバーフローは自動でスライドする見た目のみで、個々の作品への
       リンクは持たない(選ぶ操作は/works/側で行う)。
-      サムネイルはダミー(CSSグラデーション)。実画像が用意でき次第 cf-thumb に
-      background-image を差し込む形に置き換える。
+      サムネイルは/works/側(works-list.js)と同じ画像を使用。
     -->
     <a class="works-embed works-embed-link" href="/works/" aria-label="Works一覧を見る">
       <h2 class="works-list-title">Works</h2>
@@ -59,10 +58,14 @@
       <div class="cf" aria-hidden="true">
         <div class="cf-stage">
           <ul class="cf-track">
-            <li class="cf-item"><div class="cf-thumb cf-thumb-1"></div></li>
-            <li class="cf-item"><div class="cf-thumb cf-thumb-2"></div></li>
-            <li class="cf-item"><div class="cf-thumb cf-thumb-3"></div></li>
-            <li class="cf-item"><div class="cf-thumb cf-thumb-4"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/sushi.jpg')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/matijasevic.jpg')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/easy-mosh.jpg')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/HD.jpg')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/otoko.jpg')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/meta-tic-tac-toe.jpg')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/fifteel.png')"></div></li>
+            <li class="cf-item"><div class="cf-thumb" style="background-image: url('/thumbs/portfolio.jpg')"></div></li>
           </ul>
         </div>
       </div>
