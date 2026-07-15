@@ -61,6 +61,7 @@
   position: relative;
   width: 100%;
   height: min(46vh, 320px);
+  overflow: hidden;
   perspective: 1200px;
 }
 
