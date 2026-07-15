@@ -112,6 +112,7 @@
   font-size: .9rem;
   line-height: 1.7;
   opacity: .85;
+  white-space: pre-line;
 }
 .cf-caption-link {
   display: inline-block;
