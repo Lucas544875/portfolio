@@ -267,7 +267,7 @@ function createProgramReflected(gl, vs, fs) {
   return { program, uniforms };
 }
 
-export function createRainWindowBlock(slotEl) {
+export function createRainWindowBlock(slotEl, { allowTouchDrag = true } = {}) {
   // --- GL resources (createResources / destroyResources で生成・破棄) ---
   let programs = null; // { scene, blur, splat, decay, display, dropField, metaballResolve }
   let quadVAO, quadBuffer;
@@ -957,9 +957,11 @@ export function createRainWindowBlock(slotEl) {
   }
 
   function onPointerDown(e) {
-    // モバイルのスワイプがページスクロールに使えるよう、タッチ操作は
-    // 指なぞりでの水滴描画の対象にしない(PCでのマウスドラッグのみ受け付ける)。
-    if (e.pointerType === 'touch') return;
+    // トップページの背景として埋め込まれている時だけ、モバイルのスワイプを
+    // ページスクロールに譲るためタッチ操作を無視する(allowTouchDrag=false)。
+    // 独立サブページ(/works/rain-window/)では指なぞりでの水滴描画が本作品の
+    // 核となる操作なので、タッチも常に受け付ける。
+    if (e.pointerType === 'touch' && !allowTouchDrag) return;
     stopAutoplayForUser();
     const { u, v, localX, localY } = toLocalUV(e.clientX, e.clientY);
     pointerState.down = true;
@@ -969,7 +971,7 @@ export function createRainWindowBlock(slotEl) {
     setFingerCursor(localX, localY, 1.0);
   }
   function onPointerMove(e) {
-    if (e.pointerType === 'touch') return;
+    if (e.pointerType === 'touch' && !allowTouchDrag) return;
     const { u, v, localX, localY } = toLocalUV(e.clientX, e.clientY);
     if (!autoplay.enabled) setFingerCursor(localX, localY, pointerState.down ? 1.0 : 0.55);
     if (!pointerState.down) return;

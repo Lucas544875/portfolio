@@ -111,6 +111,15 @@ main {
   overflow: hidden;
 }
 
+/* 独立サブページ(/works/rain-window/)ではこのブロックがページの全内容で
+   スクロールする対象が他にないため、指なぞりでの水滴描画中にiOSの
+   バウンス/オーバースクロールが起きないようtouch-actionを握る
+   (トップページの#works-bはここでは対象にしない: 縦に並ぶ他ブロックへ
+   スワイプでスクロールできる必要があるため)。 */
+#rain-window-stage {
+  touch-action: none;
+}
+
 .work-info {
   position: absolute;
   right: 1.25rem;

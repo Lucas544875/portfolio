@@ -50,7 +50,9 @@ if (renderer.supported) {
 
     setLoadingStage('シェーダーをコンパイル中…', 85);
     await nextPaint();
-    renderer.register(createRainWindowBlock(document.getElementById('works-b')));
+    // トップページでは他の全画面ブロックと縦に並ぶため、タッチドラッグは
+    // 受け付けずモバイルのスワイプをページスクロールに譲る。
+    renderer.register(createRainWindowBlock(document.getElementById('works-b'), { allowTouchDrag: false }));
 
     setLoadingStage('初回描画中…', 96);
     await nextPaint();
