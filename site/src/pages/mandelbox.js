@@ -366,10 +366,13 @@ function hideLoadingScreen() {
   resize();
   window.addEventListener('resize', resize);
 
-  // イベントリスナー登録
-  document.addEventListener("mousedown",mouseDown,true);
-  document.addEventListener("mouseup",mouseUp,true);
-  c.addEventListener('mousemove', mouseMove, true);
+  // イベントリスナー登録。マウス/タッチ/ペンをPointer Eventsで統一的に
+  // 扱う(タッチでも見回せるようにするため。CSS側は#canvas全体に
+  // touch-action: noneを設定済みなので、ドラッグ中にブラウザのスクロール/
+  // ピンチジェスチャーと競合することはない)。
+  document.addEventListener("pointerdown",mouseDown,true);
+  document.addEventListener("pointerup",mouseUp,true);
+  c.addEventListener('pointermove', mouseMove, true);
   c.addEventListener('wheel', onWheel, { passive: false });
   pauseBtn.addEventListener('click', togglePause);
   document.addEventListener('keydown', onKeyDown);
@@ -610,7 +613,7 @@ function onKeyDown(e) {
   togglePause();
 }
 
-//マウスインターフェース
+// ドラッグでの見回し(Pointer Eventsによりマウス/タッチ共通)
 function mouseMove(e){
   if (mouseflag){
     if (Math.abs(e.offsetX)===1 || Math.abs(e.offsetY)===1) {
