@@ -3,55 +3,17 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>雨の中の窓 — 髙柳海斗 / jack</title>
+<title>髙柳海斗 / Portfolio / 雨と結露と落書き</title>
 <link rel="stylesheet" href="/src/style.css" />
 <link rel="stylesheet" href="/src/pages/work-detail.css" />
 </head>
 <body>
 <canvas id="gl-canvas"></canvas>
 
-<a class="back-link" href="/#works-a">&larr; 戻る</a>
+<a class="back-link" href="/#works-b">&larr; 戻る</a>
 
 <main>
   <section class="block-slot work-block" id="rain-window-stage"></section>
-
-  <article class="work-detail">
-    <h1>雨の中の窓</h1>
-    <p class="lead">
-      雨粒ひとつひとつを物理シミュレーションし、指でなぞって結露を拭う。
-      フレームワークなし、素のWebGL2のみで構築。
-    </p>
-
-    <h2>できていること</h2>
-    <ul>
-      <li>
-        夜景をプロシージャルに生成し、シャープ版とブラー版の2枚を用意。
-        「拭ったマスク」でこの2枚をブレンドし、時間とともにまた曇っていく。
-      </li>
-      <li>
-        雨粒は個々に物理シミュレーション — 重力に相当するmomentumで加速し、
-        摩擦で減速。落下中は軌跡として縮小しながら子滴を残し、近くの水滴同士は
-        メタボール的に結合する。
-      </li>
-      <li>
-        各水滴は円形SDFから疑似球面レンズの法線と厚みを計算し、インスタンス描画で
-        「水滴マップ」に書き込む。曇っていても水滴の中だけは常にシャープに奥が
-        見える(実際の結露ガラスと同じ見え方)。
-      </li>
-      <li>
-        ページを開くと、手で拭うようなジェスチャーを自動再生してから、
-        ユーザーのドラッグ操作に引き継ぐ。
-      </li>
-    </ul>
-
-    <h2>技術的なメモ</h2>
-    <ul>
-      <li>レンダーターゲットはすべて<code>RGBA8</code> / <code>UNSIGNED_BYTE</code>。float系フォーマットはドライバ互換性の問題を避けるため未使用。</li>
-      <li>ブラーは低解像度FBOで行い、安いコストで強いフロストガラス感を出している。</li>
-      <li>結露の「曇りへの戻り」は8bit量子化の不動点を避けるため、指数減衰＋実時間ベースの線形減算を併用。</li>
-      <li>負荷の重い作品向けに、低スペック端末では内部解像度・水滴密度を落とすフォールバックを実装。</li>
-    </ul>
-  </article>
 </main>
 
 <script type="module" src="/src/pages/rain-window.js"></script>

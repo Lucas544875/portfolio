@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>マンデルボックスのレイマーチ(参考実装)</title>
+<link href="style.css" rel="stylesheet">
+
+<script id="fs" class="x-shader/x-fragment" src="mandelbox.frag" type="text/javascript"></script>
+<script id="vs" class="x-shader/x-vertex" src="shader.vert" type="text/javascript"></script>
+<script src="quaternion.js" type="text/javascript"></script>
+<script src="raymarch.js" type="text/javascript"></script>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="fadeOverlay"></div>
+
+  <div id="label" class="label">MANDELBOX — REFERENCE SHADER</div>
+
+  <div id="hint" class="hint">
+    ドラッグで視点を微調整・ホイールでズーム速度を調整。時間が経つと自動で同じ場所へ潜っていきます。
+  </div>
+
+  <div id="zoomPanel" class="zoom-panel">
+    <div class="zoom-row">
+      <span class="zoom-label">ZOOM</span>
+      <span id="zoomReadout" class="zoom-value">10^0.00×</span>
+    </div>
+    <div class="zoom-bar-row">
+      <div class="zoom-bar-track"><div id="zoomBarFill" class="zoom-bar-fill"></div></div>
+      <button id="pauseBtn" class="pause-btn" type="button" aria-pressed="false" aria-label="一時停止(スペースキー)">⏸</button>
+    </div>
+    <div id="zoomPhase" class="zoom-phase">全体像を確認中…</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>髙柳海斗 / Portfolio / Works</title>
+<link rel="stylesheet" href="/src/style.css" />
+<link rel="stylesheet" href="/src/components/cover-flow.css" />
+</head>
+<body class="no-webgl">
+
+<a class="back-link" href="/">&larr; 戻る</a>
+
+<main class="works-list-page">
+  <h1 class="works-list-title">Works</h1>
+
+  <section class="cf" id="cf" aria-roledescription="carousel" aria-label="作品一覧">
+    <div class="cf-stage">
+      <ul class="cf-track">
+        <li class="cf-item" data-title="刺身にタンポポ乗せるだけ" data-desc="ポストの対応問題(PCP)を体験できるブラウザゲーム" data-href="https://shashimi-ni-tanpopo-noserudake.vercel.app" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/sushi.jpg')"></div>
+        </li>
+        <li class="cf-item" data-title="Matijasevič多項式計算機" data-desc="Matijasevič多項式の26個のパラメータを多項式に代入し、素数を返すための条件の達成度をインタラクティブに確認できる" data-href="https://matijasevic-s-polynomial.vercel.app" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/matijasevic.jpg')"></div>
+        </li>
+        
+        <li class="cf-item" data-title="Easy Mosh" data-desc="映像にデータモッシュ(グリッチ)効果を加えるブラウザ完結の編集ツール" data-href="https://lucas544875.github.io/easy-mosh/" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/easy-mosh.jpg')"></div>
+        </li>
+        <li class="cf-item" data-title="Hausdorff Dimension" data-desc="GLSLで作ったシェーダーの作品集" data-href="https://hausdorff-dimension.netlify.app/" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/HD.jpg')"></div>
+        </li>
+        <li class="cf-item" data-title="漢磨き" data-desc="「男磨き」をテーマにハッカソンで製作&#10;漢字構成記述文字列に取材したブラウザゲーム" data-href="https://0ed73973.jackhack2024-i.pages.dev/" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/otoko.jpg')"></div>
+        </li>
+        <li class="cf-item" data-title="超三目並べ" data-desc="入れ子構造になった三目並べ&#10;CPU対戦・二人対戦に対応" data-href="https://lucas544875.github.io/meta-tic-tac-toe/" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/meta-tic-tac-toe.jpg')"></div>
+        </li>
+        <li class="cf-item" data-title="Fifteel" data-desc="JPHACKS2023にて製作&#10;15分ルールをテーマにしたChrome拡張機能&#10;Best Hack Day Awardを受賞" data-href="https://github.com/jphacks/NG_2308" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/fifteel.png')"></div>
+        </li>
+        <li class="cf-item" data-title="Portfolio" data-desc="このサイト" data-href="/" tabindex="0">
+          <div class="cf-thumb" style="background-image: url('/thumbs/portfolio.jpg')"></div>
+        </li>
+      </ul>
+    </div>
+
+    <div class="cf-caption">
+      <h2 class="cf-caption-title"></h2>
+      <p class="cf-caption-desc"></p>
+      <a class="cf-caption-link" href="#" target="_blank" rel="noreferrer">開く &rarr;</a>
+    </div>
+
+    <div class="cf-controls">
+      <button type="button" class="cf-btn cf-prev" aria-label="前の作品へ">&lsaquo;</button>
+      <button type="button" class="cf-btn cf-next" aria-label="次の作品へ">&rsaquo;</button>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="/src/pages/works-list.js"></script>
+</body>
+</html>

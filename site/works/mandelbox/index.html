@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>髙柳海斗 / Portfolio / フラクタルレンダラー</title>
+<style>
+  /* mandelbox-full.cssはJSモジュール経由で読み込まれ適用が遅れる(特に
+     vite devではJSがstyleを注入するまで、本番でも外部CSSの取得完了まで
+     ノースタイルの白背景が一瞬見える)。初回ペイントの時点で背景と
+     ローディング画面だけは確実に暗色になるよう、最小限を先読みで
+     インライン化しておく(内容はmandelbox-full.cssの該当ルールと重複
+     するが、後から読み込まれる本CSSが上書きしても見た目は変わらない)。 */
+  html, body { margin: 0; padding: 0; background: #04030a; }
+  #loadingScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #04030a;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="fadeOverlay"></div>
+
+<div id="loadingScreen" class="loading-screen">
+  <div class="loading-inner">
+    <div class="loading-spinner" aria-hidden="true"></div>
+    <div id="loadingText" class="loading-text">読み込み中…</div>
+    <div class="loading-bar-track">
+      <div id="loadingFill" class="loading-bar-fill"></div>
+    </div>
+    <div class="loading-note">初回はシェーダーのコンパイルに数秒〜数十秒かかる場合があります</div>
+  </div>
+</div>
+
+<a class="back-link" href="/#works-a">&larr; 戻る</a>
+
+<div id="label" class="label">FRACTAL RENDERER</div>
+
+<div id="hint" class="hint">
+  ドラッグで視点を調整・ホイールでズーム速度を調整。
+</div>
+
+<div id="zoomPanel" class="zoom-panel">
+  <div class="zoom-row">
+    <span class="zoom-label">ZOOM</span>
+    <span id="zoomReadout" class="zoom-value">10^0.00×</span>
+  </div>
+  <div class="zoom-bar-row">
+    <div class="zoom-bar-track"><div id="zoomBarFill" class="zoom-bar-fill"></div></div>
+    <button id="pauseBtn" class="pause-btn" type="button" aria-pressed="false" aria-label="一時停止(スペースキー)">&#9208;</button>
+  </div>
+  <div id="zoomPhase" class="zoom-phase">待機中…</div>
+</div>
+
+<script type="module" src="/src/pages/mandelbox.js"></script>
+</body>
+</html>

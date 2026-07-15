@@ -3,40 +3,70 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>髙柳海斗 / jack</title>
+<title>髙柳海斗 / Portfolio</title>
 <link rel="stylesheet" href="/src/style.css" />
+<link rel="stylesheet" href="/src/components/cover-flow.css" />
 </head>
 <body>
 <canvas id="gl-canvas"></canvas>
+
+<nav class="site-nav">
+  <a href="/works/">Works</a>
+  <a href="#hero">About</a>
+  <a href="https://github.com/Lucas544875" target="_blank" rel="noreferrer">GitHub</a>
+</nav>
 
 <main>
   <section class="block-slot" id="hero">
     <div class="hero-overlay">
       <h1 class="name">髙柳海斗</h1>
-      <p class="sub">jack &middot; graphics &middot; mathematics</p>
+      <p class="sub">programming &middot; graphics &middot; mathematics</p>
     </div>
   </section>
 
-  <section class="block-slot no-canvas" id="about">
-    <div class="section-inner">
+  <section class="block-slot" id="works-a">
+    <!-- <div class="section-inner">
       <h2>About</h2>
       <p>（プレースホルダ）数学・物理シミュレーション・グラフィックスへの関心。文面は未確定。</p>
+    </div> -->
+
+    <div class="work-info">
+      <h2>フラクタルリアルタイムレンダラー</h2>
+      <p>レイマーチで描くフラクタル。無限に細かい構造を持つ物体の描画をWebGLで実現。</p>
+      <a class="work-link" href="/works/mandelbox/">詳細を見る &rarr;</a>
     </div>
   </section>
 
-  <section class="block-slot work-block" id="works-a">
+  <section class="block-slot work-block" id="works-b">
     <div class="work-info">
-      <h2>雨の中の窓</h2>
-      <p>雨粒ひとつひとつを物理シミュレーションし、指でなぞって結露を拭う。屈折・水滴同士の結合まで含めて素のWebGL2で構築。</p>
+      <h2>雨と結露と落書き</h2>
+      <p>雨粒ひとつひとつをプロシージャルに描画。屈折・水滴同士の結合・結露まで背景以外のすべてをWebGLで構築。</p>
       <a class="work-link" href="/works/rain-window/">詳細を見る &rarr;</a>
     </div>
   </section>
 
-  <section class="block-slot placeholder-block" id="works-b">
-    <div class="section-inner">
-      <h2>Works（プレースホルダ B）</h2>
-      <p>ここに実作品（例: Hausdorff次元）を差し込む。</p>
-    </div>
+  <section class="block-slot" id="works-c">
+    <!--
+      このブロック全体が/works/(Works一覧サブページ)へのリンク。
+      カバーフローは自動でスライドする見た目のみで、個々の作品への
+      リンクは持たない(選ぶ操作は/works/側で行う)。
+      サムネイルはダミー(CSSグラデーション)。実画像が用意でき次第 cf-thumb に
+      background-image を差し込む形に置き換える。
+    -->
+    <a class="works-embed works-embed-link" href="/works/" aria-label="Works一覧を見る">
+      <h2 class="works-list-title">Works</h2>
+
+      <div class="cf" aria-hidden="true">
+        <div class="cf-stage">
+          <ul class="cf-track">
+            <li class="cf-item"><div class="cf-thumb cf-thumb-1"></div></li>
+            <li class="cf-item"><div class="cf-thumb cf-thumb-2"></div></li>
+            <li class="cf-item"><div class="cf-thumb cf-thumb-3"></div></li>
+            <li class="cf-item"><div class="cf-thumb cf-thumb-4"></div></li>
+          </ul>
+        </div>
+      </div>
+    </a>
   </section>
 
   <footer>
