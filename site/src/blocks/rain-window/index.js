@@ -957,6 +957,9 @@ export function createRainWindowBlock(slotEl) {
   }
 
   function onPointerDown(e) {
+    // モバイルのスワイプがページスクロールに使えるよう、タッチ操作は
+    // 指なぞりでの水滴描画の対象にしない(PCでのマウスドラッグのみ受け付ける)。
+    if (e.pointerType === 'touch') return;
     stopAutoplayForUser();
     const { u, v, localX, localY } = toLocalUV(e.clientX, e.clientY);
     pointerState.down = true;
@@ -966,6 +969,7 @@ export function createRainWindowBlock(slotEl) {
     setFingerCursor(localX, localY, 1.0);
   }
   function onPointerMove(e) {
+    if (e.pointerType === 'touch') return;
     const { u, v, localX, localY } = toLocalUV(e.clientX, e.clientY);
     if (!autoplay.enabled) setFingerCursor(localX, localY, pointerState.down ? 1.0 : 0.55);
     if (!pointerState.down) return;
@@ -979,14 +983,10 @@ export function createRainWindowBlock(slotEl) {
   function onPointerLeave() {
     if (!pointerState.down) ui.fingerCursor.style.opacity = '0';
   }
-  function onTouchMove(e) {
-    e.preventDefault();
-  }
 
   slotEl.addEventListener('pointerdown', onPointerDown);
   slotEl.addEventListener('pointermove', onPointerMove);
   slotEl.addEventListener('pointerleave', onPointerLeave);
-  slotEl.addEventListener('touchmove', onTouchMove, { passive: false });
   window.addEventListener('pointerup', onPointerUp);
 
   return {
@@ -1051,7 +1051,6 @@ export function createRainWindowBlock(slotEl) {
       slotEl.removeEventListener('pointerdown', onPointerDown);
       slotEl.removeEventListener('pointermove', onPointerMove);
       slotEl.removeEventListener('pointerleave', onPointerLeave);
-      slotEl.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('pointerup', onPointerUp);
       if (ui) {
         ui.root.remove();

@@ -245,6 +245,9 @@ export function createMandelboxBlock(slotEl) {
   let lastPY = 0;
 
   function onPointerDown(e) {
+    // モバイルのスワイプがページスクロールに使えるよう、タッチ操作は
+    // ドラッグ見回しの対象にしない(PCでのマウスドラッグのみ受け付ける)。
+    if (e.pointerType === 'touch') return;
     dragging = true;
     lastPX = e.clientX;
     lastPY = e.clientY;

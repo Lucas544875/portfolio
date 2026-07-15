@@ -109,13 +109,6 @@ main {
 .work-block {
   min-height: 100vh;
   overflow: hidden;
-  touch-action: none;
-}
-
-/* マンデルボックスの背景をドラッグで見回せるようにする(ページの縦スクロール
-   ジェスチャーと競合しないよう、rain-window(.work-block)と同様に握る)。 */
-#works-a {
-  touch-action: none;
 }
 
 .work-info {
