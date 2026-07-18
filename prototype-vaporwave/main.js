@@ -140,11 +140,13 @@ float fbm(vec2 p) {
   return v;
 }
 
-// 中央に平原、左右に fbm の山岳
+// 中央に平原、左右に fbm の山岳。
+// カメラから遠いほど高さを絞り、遠方でレイが山に捕まらず空へ抜けるようにする
 float terrain(vec2 xz) {
   float valley = smoothstep(2.0, 7.0, abs(xz.x));
   float m = fbm(xz * vec2(0.18, 0.12));
-  return valley * m * m * 3.2;
+  float falloff = 1.0 - smoothstep(10.0, 40.0, distance(xz, uCamPos.xz));
+  return valley * m * m * 5.5 * falloff;
 }
 
 float march(vec3 ro, vec3 rd, out vec3 hitPos) {
