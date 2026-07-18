@@ -10,7 +10,7 @@
 // - インタラクション:
 //     ポインタ移動      → 視点のパララックス
 //     ホイール          → 前進速度
-//     ボタン            → VHSノイズのON/OFF、パレット切替(DUSK/MIDNIGHT/DAWN)
+//     ボタン            → パレット切替(DUSK/MIDNIGHT/DAWN)
 // ============================================================================
 
 const canvas = document.getElementById("glcanvas");
@@ -46,7 +46,6 @@ const CONFIG = {
   LOOK_PITCH_RANGE: 0.2,
   // イージングは毎秒の収束レート(フレームレート非依存)
   LOOK_RATE: 2.7,
-  NOISE_RATE: 3.6,
   PALETTE_RATE: 2.1,
   SPEED_RATE: 1.8,
 };
@@ -261,7 +260,6 @@ out vec4 outColor;
 uniform sampler2D uScene;
 uniform vec2 uRes;
 uniform float uTime;
-uniform float uVhs; // 0..1(トグルをスムーズに追従)
 
 float hash11(float p) {
   p = fract(p * 443.8975);
@@ -285,14 +283,14 @@ void main() {
   // 行単位のジッタ。ときどきバーストして大きくズレる
   float lineId = floor(gl_FragCoord.y / 3.0);
   float burst = step(0.965, hash11(floor(uTime * 2.7))); // たまに起こる大ノイズ
-  float jitterAmp = uVhs * (0.0012 + burst * 0.011);
+  float jitterAmp = 0.0012 + burst * 0.011;
   uv.x += (hash21(vec2(lineId, floor(uTime * 17.0))) - 0.5) * jitterAmp;
 
   // ゆっくり流れるトラッキングバー
   float bar = smoothstep(0.06, 0.0, abs(fract(uv.y * 0.7 + uTime * 0.05) - 0.5) - 0.42);
 
   // 色収差(中心から離れるほど強い)
-  vec2 ca = c * (0.0016 + uVhs * 0.0022 + burst * uVhs * 0.004);
+  vec2 ca = c * (0.0038 + burst * 0.004);
   vec3 col;
   col.r = texture(uScene, uv + ca).r;
   col.g = texture(uScene, uv).g;
@@ -303,9 +301,9 @@ void main() {
   col *= outside.x * outside.y;
 
   // 走査線 + グレイン + トラッキングバーのうっすらした持ち上げ
-  float scan = 1.0 - uVhs * 0.14 * (0.5 + 0.5 * sin(gl_FragCoord.y * 2.1));
-  float grain = (hash21(uv * uRes + fract(uTime) * 337.0) - 0.5) * 0.055 * (0.4 + uVhs);
-  col = col * scan + grain + bar * uVhs * 0.025;
+  float scan = 1.0 - 0.14 * (0.5 + 0.5 * sin(gl_FragCoord.y * 2.1));
+  float grain = (hash21(uv * uRes + fract(uTime) * 337.0) - 0.5) * 0.077;
+  col = col * scan + grain + bar * 0.025;
 
   // ビネット
   float vig = smoothstep(1.55, 0.45, length(c));
@@ -351,7 +349,7 @@ const sceneU = uniformMap(sceneProg, [
   "uRes", "uTime", "uLook", "uCamPos",
   "uSkyTop", "uSkyHorizon", "uSunTop", "uSunBottom", "uGridCol",
 ]);
-const postU = uniformMap(postProg, ["uScene", "uRes", "uTime", "uVhs"]);
+const postU = uniformMap(postProg, ["uScene", "uRes", "uTime"]);
 
 // シーン描画先のFBO
 const sceneTex = gl.createTexture();
@@ -389,8 +387,6 @@ const state = {
   targetSpeed: CONFIG.SPEED_DEFAULT,
   look: [0, 0],
   targetLook: [0, 0],
-  vhs: 1,
-  targetVhs: 1,
   paletteIndex: 0,
   palette: PALETTES[0].colors.map((c) => c.slice()), // 現在値(補間される)
   interacted: false,
@@ -436,12 +432,6 @@ canvas.addEventListener(
   { passive: false }
 );
 
-const vhsBtn = document.getElementById("toggleVhs");
-vhsBtn.addEventListener("click", () => {
-  state.targetVhs = state.targetVhs > 0.5 ? 0 : 1;
-  vhsBtn.setAttribute("aria-pressed", String(state.targetVhs > 0.5));
-});
-
 let paletteNameTimer = 0;
 document.getElementById("cyclePalette").addEventListener("click", () => {
   state.paletteIndex = (state.paletteIndex + 1) % PALETTES.length;
@@ -462,14 +452,13 @@ function frame(nowMs) {
   prevMs = nowMs;
   state.time = (nowMs - startMs) / 1000;
 
-  // 前進・視点・ノイズ量のスムージング(時間ベースでフレームレート非依存)
+  // 前進・視点のスムージング(時間ベースでフレームレート非依存)
   const ease = (rate) => 1 - Math.exp(-rate * dt);
   state.speed += (state.targetSpeed - state.speed) * ease(CONFIG.SPEED_RATE);
   state.dist += state.speed * dt;
   const lookK = ease(CONFIG.LOOK_RATE);
   state.look[0] += (state.targetLook[0] - state.look[0]) * lookK;
   state.look[1] += (state.targetLook[1] - state.look[1]) * lookK;
-  state.vhs += (state.targetVhs - state.vhs) * ease(CONFIG.NOISE_RATE);
 
   // パレットの補間
   const target = PALETTES[state.paletteIndex].colors;
@@ -507,7 +496,6 @@ function frame(nowMs) {
   gl.uniform1i(postU.uScene, 0);
   gl.uniform2f(postU.uRes, canvas.width, canvas.height);
   gl.uniform1f(postU.uTime, state.time);
-  gl.uniform1f(postU.uVhs, state.vhs);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   requestAnimationFrame(frame);
