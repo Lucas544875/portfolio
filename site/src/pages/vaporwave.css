@@ -1,0 +1,57 @@
+/* /works/vaporwave/ サブページ専用: パレット切替ボタンとパレット名の表示。
+   見た目はprototype-vaporwaveのUIをサイトのトーンに合わせて持ち込んだもの。 */
+
+/* 右上はback-link(共通の「戻る」)が使うので、参考実装と同じ左上に置く */
+.vw-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+
+.vw-toggle-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(24, 12, 40, 0.45);
+  backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.vw-toggle-btn .material-symbols-outlined {
+  font-size: 20px;
+  font-variation-settings: "opsz" 20, "wght" 300, "FILL" 0, "GRAD" 0;
+}
+
+.vw-toggle-btn:hover {
+  border-color: rgba(255, 122, 217, 0.6);
+  color: #ff7ad9;
+}
+
+.vw-palette-name {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(28px, 6vw, 64px);
+  font-weight: 200;
+  letter-spacing: 0.6em;
+  padding-left: 0.6em; /* letter-spacing の右余白を相殺してセンタリング */
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 0 24px rgba(255, 122, 217, 0.8);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+  transition: opacity 0.4s ease;
+}
+
+.vw-palette-name.show {
+  opacity: 1;
+}

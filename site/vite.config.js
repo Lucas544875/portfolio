@@ -14,6 +14,7 @@ export default defineConfig({
         worksList: resolve(__dirname, 'works/index.html'),
         rainWindow: resolve(__dirname, 'works/rain-window/index.html'),
         mandelbox: resolve(__dirname, 'works/mandelbox/index.html'),
+        vaporwave: resolve(__dirname, 'works/vaporwave/index.html'),
       },
     },
   },

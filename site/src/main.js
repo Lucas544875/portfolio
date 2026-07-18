@@ -3,6 +3,7 @@ import { SharedGLRenderer } from './gl/renderer.js';
 import { createHeroBlock } from './blocks/hero/index.js';
 import { createMandelboxBlock } from './blocks/mandelbox/index.js';
 import { createRainWindowBlock } from './blocks/rain-window/index.js';
+import { createVaporwaveBlock } from './blocks/vaporwave/index.js';
 import { initCoverFlowAuto } from './components/cover-flow-auto.js';
 
 const canvas = document.getElementById('gl-canvas');
@@ -44,15 +45,19 @@ if (renderer.supported) {
     await nextPaint();
     renderer.register(createHeroBlock(document.getElementById('hero')));
 
-    setLoadingStage('シェーダーをコンパイル中…', 60);
+    setLoadingStage('シェーダーをコンパイル中…', 55);
     await nextPaint();
     renderer.register(createMandelboxBlock(document.getElementById('works-a')));
 
-    setLoadingStage('シェーダーをコンパイル中…', 85);
+    setLoadingStage('シェーダーをコンパイル中…', 75);
     await nextPaint();
     // トップページでは他の全画面ブロックと縦に並ぶため、タッチドラッグは
     // 受け付けずモバイルのスワイプをページスクロールに譲る。
     renderer.register(createRainWindowBlock(document.getElementById('works-b'), { allowTouchDrag: false }));
+
+    setLoadingStage('シェーダーをコンパイル中…', 90);
+    await nextPaint();
+    renderer.register(createVaporwaveBlock(document.getElementById('works-d')));
 
     setLoadingStage('初回描画中…', 96);
     await nextPaint();
