@@ -151,7 +151,7 @@ float terrain(vec2 xz) {
 
 float march(vec3 ro, vec3 rd, out vec3 hitPos) {
   float t = 0.05;
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 170; i++) {
     vec3 p = ro + rd * t;
     float dy = p.y - terrain(p.xz);
     if (dy < 0.002 * t) {
