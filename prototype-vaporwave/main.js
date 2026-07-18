@@ -8,7 +8,6 @@
 // - シーンを低解像度FBOに描き、フルスクリーンのポストパスで
 //   VHS風の質感(バレル歪み・色収差・走査線・行ジッタ・グレイン・ビネット)を乗せる
 // - インタラクション:
-//     なぞる/クリック  → グリッド上に波紋(高さの波 + 波面の発光リング)
 //     ポインタ移動      → 視点のパララックス
 //     ホイール          → 前進速度
 //     ボタン            → VHSノイズのON/OFF、パレット切替(DUSK/MIDNIGHT/DAWN)
@@ -38,11 +37,8 @@ if (!gl) {
 const CONFIG = {
   SCENE_SCALE: 0.66, // レイマーチは重いので低解像度FBOに描き、ポストで引き伸ばす
   MAX_DPR: 1.75,
-  FOV: 1.25, // 焦点距離(大きいほど狭角)。JS側のアンプロジェクトと共有する
+  FOV: 1.25, // 焦点距離(大きいほど狭角)
   CAM_HEIGHT: 1.05,
-  MAX_RIPPLES: 8,
-  RIPPLE_MIN_INTERVAL: 0.11, // なぞり中に波紋を落とす最短間隔(秒)
-  RIPPLE_MIN_DIST_PX: 28, // なぞり中に波紋を落とす最短移動量
   SPEED_DEFAULT: 2.2,
   SPEED_MIN: 0.4,
   SPEED_MAX: 11.0,
@@ -55,7 +51,7 @@ const CONFIG = {
   SPEED_RATE: 1.8,
 };
 
-// パレット: [skyTop, skyHorizon, sunTop, sunBottom, grid, rippleGlow]
+// パレット: [skyTop, skyHorizon, sunTop, sunBottom, grid]
 const PALETTES = [
   {
     name: "DUSK",
@@ -65,7 +61,6 @@ const PALETTES = [
       [1.0, 0.83, 0.10],
       [1.0, 0.16, 0.46],
       [1.0, 0.18, 0.63],
-      [0.16, 1.0, 1.0],
     ],
   },
   {
@@ -76,7 +71,6 @@ const PALETTES = [
       [0.72, 0.40, 1.0],
       [0.086, 0.88, 1.0],
       [0.086, 0.95, 1.0],
-      [1.0, 0.44, 0.81],
     ],
   },
   {
@@ -87,7 +81,6 @@ const PALETTES = [
       [1.0, 0.98, 0.59],
       [1.0, 0.44, 0.81],
       [0.02, 1.0, 0.63],
-      [1.0, 0.98, 0.59],
     ],
   },
 ];
@@ -110,13 +103,11 @@ uniform vec2 uRes;
 uniform float uTime;
 uniform vec2 uLook;    // (yaw, pitch)
 uniform vec3 uCamPos;
-uniform vec4 uRipples[${CONFIG.MAX_RIPPLES}]; // (x, z, 開始時刻, 強さ)
 uniform vec3 uSkyTop;
 uniform vec3 uSkyHorizon;
 uniform vec3 uSunTop;
 uniform vec3 uSunBottom;
 uniform vec3 uGridCol;
-uniform vec3 uGlowCol;
 
 const float FOV = ${CONFIG.FOV.toFixed(3)};
 const float FAR = 70.0;
@@ -149,37 +140,11 @@ float fbm(vec2 p) {
   return v;
 }
 
-// 波紋による高さの変位。glowOut には波面の発光リング量を返す
-float rippleField(vec2 xz, out float glowOut) {
-  float h = 0.0;
-  glowOut = 0.0;
-  for (int i = 0; i < ${CONFIG.MAX_RIPPLES}; i++) {
-    vec4 r = uRipples[i];
-    float age = uTime - r.z;
-    if (r.w <= 0.001 || age < 0.0 || age > 5.0) continue;
-    float d = length(xz - r.xy);
-    float env = exp(-d * 0.35) * exp(-age * 0.9) * r.w;
-    h += sin(d * 6.0 - age * 8.0) * env * 0.35;
-    float front = age * 3.0; // 波面の伝播速度
-    glowOut += exp(-abs(d - front) * 2.5) * exp(-age * 0.8) * r.w;
-  }
-  return h;
-}
-
-float rippleHeight(vec2 xz) {
-  float g;
-  return rippleField(xz, g);
-}
-
 // 中央に平原、左右に fbm の山岳
-float terrainBase(vec2 xz) {
+float terrain(vec2 xz) {
   float valley = smoothstep(2.0, 7.0, abs(xz.x));
   float m = fbm(xz * vec2(0.18, 0.12));
   return valley * m * m * 3.2;
-}
-
-float terrain(vec2 xz) {
-  return terrainBase(xz) + rippleHeight(xz);
 }
 
 float march(vec3 ro, vec3 rd, out vec3 hitPos) {
@@ -241,7 +206,7 @@ void main() {
   vec2 ndc = uv * 2.0 - 1.0;
   ndc.x *= uRes.x / uRes.y;
 
-  // ピッチ → ヨーの順で回転(JS側のアンプロジェクトと一致させること)
+  // ピッチ → ヨーの順で回転
   vec3 rd = normalize(vec3(ndc.x, ndc.y, -FOV));
   float cp = cos(uLook.y), sp = sin(uLook.y);
   rd.yz = mat2(cp, -sp, sp, cp) * rd.yz;
@@ -260,9 +225,7 @@ void main() {
   vec3 fogCol = uSkyHorizon * 0.75 + uSunBottom * sunAmount * 0.6;
 
   if (t > 0.0) {
-    float h = terrainBase(p.xz);
-    float rglow;
-    rippleField(p.xz, rglow);
+    float h = terrain(p.xz);
 
     // グリッド線: 整数座標に近いほど明るい。距離とともに太らせてエイリアスを抑える
     vec2 gr = abs(fract(p.xz) - 0.5);
@@ -275,7 +238,6 @@ void main() {
     float pulse = 0.9 + 0.25 * sin(uTime * 0.9 + p.z * 0.05);
     col = ground;
     col += uGridCol * line * 1.35 * fade * pulse;
-    col += uGlowCol * rglow * (0.18 + line * 1.6) * fade; // 波紋は主にグリッド線を光らせる
     col = mix(col, fogCol, 1.0 - exp(-t * 0.028));
   } else {
     col = skyColor(rd);
@@ -343,9 +305,9 @@ void main() {
   float grain = (hash21(uv * uRes + fract(uTime) * 337.0) - 0.5) * 0.055 * (0.4 + uVhs);
   col = col * scan + grain + bar * uVhs * 0.025;
 
-  // ビネットとほのかなフリッカー
+  // ビネット
   float vig = smoothstep(1.55, 0.45, length(c));
-  col *= vig * (1.0 - uVhs * 0.02 * sin(uTime * 60.0));
+  col *= vig;
 
   outColor = vec4(col, 1.0);
 }`;
@@ -384,8 +346,8 @@ function uniformMap(prog, names) {
 }
 
 const sceneU = uniformMap(sceneProg, [
-  "uRes", "uTime", "uLook", "uCamPos", "uRipples",
-  "uSkyTop", "uSkyHorizon", "uSunTop", "uSunBottom", "uGridCol", "uGlowCol",
+  "uRes", "uTime", "uLook", "uCamPos",
+  "uSkyTop", "uSkyHorizon", "uSunTop", "uSunBottom", "uGridCol",
 ]);
 const postU = uniformMap(postProg, ["uScene", "uRes", "uTime", "uVhs"]);
 
@@ -429,55 +391,12 @@ const state = {
   targetVhs: 1,
   paletteIndex: 0,
   palette: PALETTES[0].colors.map((c) => c.slice()), // 現在値(補間される)
-  ripples: new Float32Array(CONFIG.MAX_RIPPLES * 4),
-  rippleCursor: 0,
-  lastRippleTime: -1,
-  lastRipplePos: null,
-  dragging: false,
   interacted: false,
 };
 
 function camPos() {
   const bob = 0.05 * Math.sin(state.time * 0.5);
   return [0, CONFIG.CAM_HEIGHT + bob, -state.dist];
-}
-
-// スクリーン座標 → グリッド平面(y=0)のワールド座標。
-// シェーダのレイ生成(ピッチ → ヨー)と完全に同じ計算にすること
-function unprojectToGround(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  const aspect = rect.width / rect.height;
-  let x = ((clientX - rect.left) / rect.width) * 2 - 1;
-  let y = -(((clientY - rect.top) / rect.height) * 2 - 1);
-  x *= aspect;
-  let rd = [x, y, -CONFIG.FOV];
-  const [yaw, pitch] = state.look;
-  const cp = Math.cos(pitch), sp = Math.sin(pitch);
-  rd = [rd[0], cp * rd[1] - sp * rd[2], sp * rd[1] + cp * rd[2]];
-  const cy = Math.cos(yaw), sy = Math.sin(yaw);
-  rd = [cy * rd[0] - sy * rd[2], rd[1], sy * rd[0] + cy * rd[2]];
-  const ro = camPos();
-  if (rd[1] >= -0.02) return null; // 空をなぞっている
-  const s = -ro[1] / rd[1];
-  if (s > 60) return null;
-  return [ro[0] + rd[0] * s, ro[2] + rd[2] * s];
-}
-
-function spawnRipple(worldX, worldZ, strength) {
-  const i = state.rippleCursor * 4;
-  state.ripples[i] = worldX;
-  state.ripples[i + 1] = worldZ;
-  state.ripples[i + 2] = state.time;
-  state.ripples[i + 3] = strength;
-  state.rippleCursor = (state.rippleCursor + 1) % CONFIG.MAX_RIPPLES;
-}
-
-function tryRippleAt(clientX, clientY, strength) {
-  const w = unprojectToGround(clientX, clientY);
-  if (!w) return;
-  spawnRipple(w[0], w[1], strength);
-  state.lastRippleTime = state.time;
-  state.lastRipplePos = [clientX, clientY];
 }
 
 // ----------------------------------------------------------------------------
@@ -490,11 +409,8 @@ function markInteracted() {
   }
 }
 
-canvas.addEventListener("pointerdown", (e) => {
+canvas.addEventListener("pointerdown", () => {
   markInteracted();
-  state.dragging = true;
-  canvas.setPointerCapture(e.pointerId);
-  tryRippleAt(e.clientX, e.clientY, 1.0);
 });
 
 canvas.addEventListener("pointermove", (e) => {
@@ -503,23 +419,6 @@ canvas.addEventListener("pointermove", (e) => {
   const ny = (e.clientY - rect.top) / rect.height - 0.5;
   state.targetLook[0] = -nx * CONFIG.LOOK_YAW_RANGE;
   state.targetLook[1] = -ny * CONFIG.LOOK_PITCH_RANGE;
-
-  if (!state.dragging) return;
-  const last = state.lastRipplePos;
-  const moved = last
-    ? Math.hypot(e.clientX - last[0], e.clientY - last[1])
-    : Infinity;
-  if (
-    state.time - state.lastRippleTime > CONFIG.RIPPLE_MIN_INTERVAL &&
-    moved > CONFIG.RIPPLE_MIN_DIST_PX
-  ) {
-    tryRippleAt(e.clientX, e.clientY, 0.7);
-  }
-});
-
-canvas.addEventListener("pointerup", () => {
-  state.dragging = false;
-  state.lastRipplePos = null;
 });
 
 canvas.addEventListener(
@@ -551,16 +450,6 @@ document.getElementById("cyclePalette").addEventListener("click", () => {
 });
 
 // ----------------------------------------------------------------------------
-// オープニング: 自動で波紋を落として遊び方を見せる
-// ----------------------------------------------------------------------------
-const autoRipples = [
-  { at: 1.2, u: 0.5, v: 0.68 },
-  { at: 2.3, u: 0.36, v: 0.74 },
-  { at: 3.2, u: 0.65, v: 0.7 },
-];
-let autoIndex = 0;
-
-// ----------------------------------------------------------------------------
 // Render loop
 // ----------------------------------------------------------------------------
 const startMs = performance.now();
@@ -589,15 +478,6 @@ function frame(nowMs) {
     }
   }
 
-  // オープニングの自動波紋(ユーザーが触れるまで)
-  if (!state.interacted && autoIndex < autoRipples.length &&
-      state.time >= autoRipples[autoIndex].at) {
-    const a = autoRipples[autoIndex++];
-    const rect = canvas.getBoundingClientRect();
-    tryRippleAt(rect.left + rect.width * a.u, rect.top + rect.height * a.v, 0.9);
-    state.lastRipplePos = null;
-  }
-
   resize();
 
   // --- パス1: シーンを低解像度FBOへ ---
@@ -608,14 +488,12 @@ function frame(nowMs) {
   gl.uniform1f(sceneU.uTime, state.time);
   gl.uniform2f(sceneU.uLook, state.look[0], state.look[1]);
   gl.uniform3fv(sceneU.uCamPos, camPos());
-  gl.uniform4fv(sceneU.uRipples, state.ripples);
-  const [skyTop, skyHorizon, sunTop, sunBottom, grid, glow] = state.palette;
+  const [skyTop, skyHorizon, sunTop, sunBottom, grid] = state.palette;
   gl.uniform3fv(sceneU.uSkyTop, skyTop);
   gl.uniform3fv(sceneU.uSkyHorizon, skyHorizon);
   gl.uniform3fv(sceneU.uSunTop, sunTop);
   gl.uniform3fv(sceneU.uSunBottom, sunBottom);
   gl.uniform3fv(sceneU.uGridCol, grid);
-  gl.uniform3fv(sceneU.uGlowCol, glow);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // --- パス2: VHSポストプロセスで画面へ ---
